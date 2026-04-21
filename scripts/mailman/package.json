@@ -1,0 +1,15 @@
+{
+  "name": "claude-mailman",
+  "version": "0.2.0",
+  "private": true,
+  "description": "On-demand scrape Google Chat group DM into a local SQLite inbox for Claude Code",
+  "type": "module",
+  "scripts": {
+    "auth": "bun run auth.ts",
+    "collect": "bun run collector.ts",
+    "fetch": "bun run fetch.ts"
+  },
+  "dependencies": {
+    "playwright": "^1.59.1"
+  }
+}

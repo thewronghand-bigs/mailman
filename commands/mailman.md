@@ -1,0 +1,45 @@
+---
+description: Google Chat에서 수집한 최신 메시지(API 스펙 등) 가져오기
+argument-hint: "[개수=5]"
+allowed-tools: Bash(~/.claude/scripts/mailman/run.sh:*), Bash(~/.claude/scripts/mailman/fetch.sh:*), Bash(~/.claude/scripts/mailman/send.sh:*)
+---
+
+!`~/.claude/scripts/mailman/fetch.sh $ARGUMENTS`
+
+위는 구글챗 그룹 DM에서 mailman이 수집한 최근 메시지입니다.
+작업 중인 티켓과 관련된 API 스펙이 있다면 타입 정의와 요청 작성에 활용하세요.
+
+## 작업 완료 시 Google Chat 전송 (승인 필수)
+
+이 `/mailman` 세션에서 가져온 API 스펙을 바탕으로 실제 구현/수정 작업을 진행했고,
+그 작업이 완료된 시점에 다음을 수행하라:
+
+1. **요약 초안 작성** — 아래 포맷으로 간결하게 작성:
+   ```
+   [작업 완료 알림]
+   도메인: {파악된 경우}
+   변경 요약:
+   - {핵심 변경 1}
+   - {핵심 변경 2}
+   변경 파일:
+   - path/to/file1
+   - path/to/file2
+   남은 이슈/질문: {있는 경우만, 없으면 "없음"}
+   ```
+   5~10줄 이내. 불필요한 수식어 금지.
+
+2. **사용자 승인 요청** — 초안을 출력한 뒤 "이 내용으로 Google Chat에 전송할까요?" 라고 묻는다.
+   승인 전에는 절대 전송하지 않는다. 수정 요청 시 반영 후 재승인 요청.
+
+3. **전송 실행** — 승인되면:
+   ```
+   cat <<'MAILMAN_EOF' | bash ~/.claude/scripts/mailman/send.sh
+   [초안 내용]
+   MAILMAN_EOF
+   ```
+   `✅ 전송 완료` 확인 후 사용자에게 보고. 실패 시 재시도하지 않고 알린다.
+
+예외:
+- `/mailman`과 무관한 다른 작업 중에는 이 절차를 적용하지 않는다.
+- 코드 수정 없이 분석만 한 경우 "변경 파일: 없음 (분석만 수행)"으로 명시.
+- "수집된 데이터가 없습니다" 메시지만 출력된 경우 아무 것도 하지 않는다.
