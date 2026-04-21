@@ -6,8 +6,7 @@
 <h1 align="center">Mailman</h1>
 
 <p align="center">
-  <i>백엔드와 스펙 주고받기, 귀찮으시죠?</i><br/>
-  <i>Mailman이 대체해드립니다.</i>
+  <i>Mailman. 소통을 딸깍하세요.</i>
 </p>
 
 ---
@@ -22,15 +21,12 @@
 
 ## 이게 뭔데요
 
-Google Chat 그룹 DM 에 백엔드가 봇으로 뿌려놓은 API 스펙을, Claude Code 에서 `/mailman` 한 방으로 빨아옵니다.
-
-복사하고, 붙여넣고, 포맷 깨지고, 다시 복사하고 — 그 지옥에서 탈출하세요.
+백엔드가 봇으로 뿌린 스펙을 봇으로 빨아옵니다.
 
 ```
 /mailman
 ```
 
-끝입니다. 이게 다예요. 인생이 바뀝니다. (스펙은 안 바뀝니다. 그건 백엔드 탓이에요.)
 
 ## FAQ
 
@@ -52,7 +48,7 @@ A. 유감입니다.
 curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/claude-mailman/main/install.sh | bash
 ```
 
-이 한 줄이면 끝. bun이 없으면 [여기서](https://bun.sh) 먼저 설치하세요.
+bun이 없으면 [여기서](https://bun.sh) 먼저 설치하세요.
 
 ## 설정
 
@@ -86,7 +82,7 @@ bash ~/.claude/scripts/mailman/run.sh auth
 
 Chrome이 뜹니다. 회사 계정으로 로그인하세요. 그룹 DM이 보이면 터미널에서 Enter.
 
-세션은 저장됩니다. 며칠~몇 주마다 만료되면 다시 하면 됩니다. 인생이 원래 그렇습니다.
+세션이 만료되면 다시 로그인하세요.
 
 ### 3. 사용법
 
@@ -96,15 +92,13 @@ Chrome이 뜹니다. 회사 계정으로 로그인하세요. 그룹 DM이 보이
 
 webhook URL을 설정했다면, 작업 완료 후 Claude가 알아서 그룹 DM에 완료 알림을 보내줍니다.
 
-"프론트 다 했는데요" 를 타이핑하는 것조차 AI가 대신해주는 세상.
-
-## 요구사항
+## 준비물
 
 - macOS
 - [bun](https://bun.sh) >= 1.0
 - Google Chrome
 - Claude Code
-- 백엔드가 스펙을 줬다는 사실 (이건 Mailman이 해결 못 합니다)
+- 스펙을 줄 백엔드
 
 ## 문제 생기면
 
