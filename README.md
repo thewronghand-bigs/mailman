@@ -6,7 +6,7 @@
 <h1 align="center">Mailman</h1>
 
 <p align="center">
-  <i>Mailman. 소통을 딸깍하세요.</i>
+  <i>소통을 딸깍하세요.</i>
 </p>
 
 ---
