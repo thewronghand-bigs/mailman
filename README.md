@@ -1,4 +1,5 @@
-<img width="74" height="74" alt="mailman" src="https://github.com/user-attachments/assets/39bb5114-4ce7-4ad5-928e-caa7bbf941a6" />
+
+<img width="261" height="261" alt="mailman" src="https://github.com/user-attachments/assets/b913ae4d-6ab5-4f7a-b655-7acd3865e33d" />
 
 # claude-mailman
 
