@@ -10,11 +10,27 @@
 
 import { Database } from "bun:sqlite";
 import { homedir } from "node:os";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
+
+const SCRIPT_DIR = dirname(new URL(import.meta.url).pathname);
+const config = JSON.parse(readFileSync(`${SCRIPT_DIR}/config.json`, "utf8"));
+const bots: Record<string, string> = config.bots ?? {};
 
 const DB_PATH = `${homedir()}/.claude/inbox/mailman.db`;
-const limit = Math.max(1, Math.min(50, Number(process.argv[2] || 5)));
 
+// 인자 파싱: [별칭] [개수]  /  [개수]  /  [별칭]  /  (없음)
+const args = process.argv.slice(2);
+let botDisplayName = "";
+let limit = 5;
+
+for (const a of args) {
+  if (bots[a]) {
+    botDisplayName = bots[a]!;
+  } else if (/^\d+$/.test(a)) {
+    limit = Math.max(1, Math.min(50, Number(a)));
+  }
+}
 if (!existsSync(DB_PATH)) {
   console.log("수집된 데이터가 없습니다. 먼저 `bash ~/.claude/scripts/mailman/run.sh` 를 실행하세요.");
   process.exit(0);
@@ -31,15 +47,25 @@ type Row = {
 const db = new Database(DB_PATH, { readonly: true });
 
 // 최신 thread N 개를 뽑기 위해, 먼저 각 thread 의 최대 createTime 으로 정렬
-const threadRows = db
-  .prepare(
-    `SELECT COALESCE(thread_name, id) AS tid, MAX(createTime) AS last_time
+// botDisplayName 이 있으면 해당 발신자 메시지가 포함된 스레드만 필터
+const threadQuery = botDisplayName
+  ? `SELECT COALESCE(thread_name, id) AS tid, MAX(createTime) AS last_time
+     FROM messages
+     WHERE sender_display_name = ?
+     GROUP BY tid
+     ORDER BY last_time DESC
+     LIMIT ?`
+  : `SELECT COALESCE(thread_name, id) AS tid, MAX(createTime) AS last_time
      FROM messages
      GROUP BY tid
      ORDER BY last_time DESC
-     LIMIT ?`,
-  )
-  .all(limit) as Array<{ tid: string; last_time: string }>;
+     LIMIT ?`;
+
+const threadRows = (
+  botDisplayName
+    ? db.prepare(threadQuery).all(botDisplayName, limit)
+    : db.prepare(threadQuery).all(limit)
+) as Array<{ tid: string; last_time: string }>;
 
 if (threadRows.length === 0) {
   console.log(

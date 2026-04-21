@@ -1,6 +1,6 @@
 ---
 description: Google Chat에서 수집한 최신 메시지(API 스펙 등) 가져오기
-argument-hint: "[개수=5]"
+argument-hint: "[봇별칭] [개수=5]  예: 희조봇 3"
 allowed-tools: Bash(~/.claude/scripts/mailman/run.sh:*), Bash(~/.claude/scripts/mailman/fetch.sh:*), Bash(~/.claude/scripts/mailman/send.sh:*)
 ---
 

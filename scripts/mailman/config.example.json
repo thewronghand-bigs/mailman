@@ -1,6 +1,10 @@
 {
   "spaceUrl": "https://chat.google.com/u/0/app/chat/YOUR_SPACE_ID",
   "spaceName": "팀 DM 이름",
-  "botName": "추적할 봇 표시 이름",
-  "webhookUrl": "https://chat.googleapis.com/v1/spaces/YOUR_SPACE/messages?key=YOUR_KEY&token=YOUR_TOKEN"
+  "webhookUrl": "https://chat.googleapis.com/v1/spaces/YOUR_SPACE/messages?key=YOUR_KEY&token=YOUR_TOKEN",
+  "bots": {
+    "별칭1": "봇 표시 이름 1",
+    "별칭2": "봇 표시 이름 2"
+  },
+  "defaultBot": "별칭1"
 }

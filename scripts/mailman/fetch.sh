@@ -6,7 +6,6 @@
 set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIMIT="${1:-5}"
 
 # 수집 시도 (실패해도 기존 DB 내용은 그대로 출력)
 bash "$SCRIPT_DIR/run.sh" > /dev/null 2>&1 || true
@@ -19,4 +18,4 @@ fi
 
 BUN_BIN="$(command -v bun || echo "$HOME/.nvm/versions/node/v24.11.1/bin/bun")"
 cd "$SCRIPT_DIR"
-"$BUN_BIN" run fetch.ts "$LIMIT"
+"$BUN_BIN" run fetch.ts "$@"

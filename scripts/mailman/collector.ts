@@ -22,7 +22,14 @@ const PROFILE_DIR = `${homedir()}/.claude/state/mailman-chrome`;
 const DB_PATH = `${homedir()}/.claude/inbox/mailman.db`;
 const CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const SPACE_URL = process.env.MAILMAN_SPACE_URL ?? config.spaceUrl;
-const BOT_NAME = process.env.MAILMAN_BOT_NAME ?? config.botName;
+
+// 봇 이름 결정: 환경변수 > CLI 인자(별칭) > defaultBot
+const bots: Record<string, string> = config.bots ?? {};
+const defaultBotAlias: string = config.defaultBot ?? Object.keys(bots)[0] ?? "";
+const botArg = process.argv[2] ?? "";
+const resolvedFromArg = botArg && bots[botArg] ? bots[botArg] : "";
+const BOT_NAME = process.env.MAILMAN_BOT_NAME
+  ?? (resolvedFromArg || bots[defaultBotAlias] || config.botName || "");
 const HEADLESS = process.env.MAILMAN_HEADLESS === "1";
 const DEBUG = process.env.MAILMAN_DEBUG === "1";
 
