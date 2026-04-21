@@ -1,21 +1,60 @@
 
-<img width="261" height="261" alt="mailman" src="https://github.com/user-attachments/assets/b913ae4d-6ab5-4f7a-b655-7acd3865e33d" />
+<p align="center">
+  <img width="261" height="261" alt="mailman" src="https://github.com/user-attachments/assets/b913ae4d-6ab5-4f7a-b655-7acd3865e33d" />
+</p>
 
-# claude-mailman
+<h1 align="center">Mailman</h1>
 
-Google Chat 그룹 DM 에서 특정 봇이 공유한 메시지를 Claude Code `/mailman` 슬래시 커맨드로 가져오는 로컬 파이프라인.
+<p align="center">
+  <i>백엔드와 스펙 주고받기, 귀찮으시죠?</i><br/>
+  <i>Mailman이 대체해드립니다.</i>
+</p>
 
-- Playwright 로 로그인된 Chrome 세션을 재사용해 chat.google.com DOM 을 읽는 방식
-- Google Chat API 는 Workspace 소유 GCP 프로젝트 없이는 사용 불가하므로 DOM 스크래핑으로 우회
-- Incoming Webhook 을 통한 메시지 전송도 지원
+---
 
-## 원라인 설치
+사악한 백뻔뻔([@SongInjun1](https://github.com/SongInjun1))의 스펙 야바위로부터 벗어나세요.
+
+잘못된 스펙에 화를 내는 역할조차 AI에게 대체되는 것이 프론트엔드의 미래입니다.
+
+지금 당장 시작하세요.
+
+> **Mailman.** *Let it replace you.*
+
+## 이게 뭔데요
+
+Google Chat 그룹 DM 에 백엔드가 봇으로 뿌려놓은 API 스펙을, Claude Code 에서 `/mailman` 한 방으로 빨아옵니다.
+
+복사하고, 붙여넣고, 포맷 깨지고, 다시 복사하고 — 그 지옥에서 탈출하세요.
+
+```
+/mailman
+```
+
+끝입니다. 이게 다예요. 인생이 바뀝니다. (스펙은 안 바뀝니다. 그건 백엔드 탓이에요.)
+
+## FAQ
+
+**Q. 왜 이걸 Google Chat API 안 쓰고 Playwright를 쓰나요?**
+
+A. 우리 회사의 GCP는 이런 누추한 기술에 사용하기엔 너무 소중합니다. 그리고 권한 요청하기가 귀찮았음.
+
+**Q. 어떻게 작동하나요?**
+
+A. 잘 모르겠는데 어떻게든 작동합니다.
+
+**Q. Codex에선 어떻게 써요?**
+
+A. 유감입니다.
+
+## 설치
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/claude-mailman/main/install.sh | bash
 ```
 
-## 설치 후 설정
+이 한 줄이면 끝. bun이 없으면 [여기서](https://bun.sh) 먼저 설치하세요.
+
+## 설정
 
 ### 1. config.json 수정
 
@@ -25,39 +64,39 @@ vi ~/.claude/scripts/mailman/config.json
 
 ```json
 {
-  "spaceUrl": "https://chat.google.com/u/0/app/chat/YOUR_SPACE_ID",
+  "spaceUrl": "https://chat.google.com/u/0/app/chat/여기에_스페이스_ID",
   "spaceName": "내 그룹 DM 이름",
   "botName": "추적할 봇 표시 이름",
   "webhookUrl": ""
 }
 ```
 
-| 필드 | 설명 | 찾는 법 |
-|------|------|---------|
-| `spaceUrl` | 대상 그룹 DM URL | 브라우저에서 해당 DM 열고 주소창 복사 |
-| `spaceName` | DM 이름 (로그용) | 자유 입력 |
-| `botName` | 추적할 봇의 **표시 이름** | DM 에서 봇 메시지 보낼 때 보이는 이름. 정확히 일치해야 함 |
-| `webhookUrl` | 전송용 webhook URL (선택) | Google Chat space 설정 > 앱 및 통합 > Webhook 추가 |
+| 필드 | 뭘 넣어야 하나 | 모르겠으면 |
+|------|----------------|-----------|
+| `spaceUrl` | 그룹 DM URL | 브라우저에서 해당 DM 열고 주소창 복사 |
+| `spaceName` | DM 이름 | 아무거나 써도 됨. 로그에만 찍힘 |
+| `botName` | 봇 표시 이름 | DM에서 봇이 메시지 보낼 때 뜨는 이름. **한 글자라도 다르면 못 잡음** |
+| `webhookUrl` | 전송용 webhook URL | 없으면 비워두세요. 보내기 기능만 안 됨 |
 
-### 2. 최초 로그인
+### 2. 최초 로그인 (1회만)
 
 ```bash
 bash ~/.claude/scripts/mailman/run.sh auth
 ```
 
-1. 새 Chrome 창이 열림 (전용 프로필)
-2. **회사 Google 계정** 으로 로그인
-3. 대상 그룹 DM 이 보이는 상태까지 진행
-4. 터미널에서 **Enter**
+Chrome이 뜹니다. 회사 계정으로 로그인하세요. 그룹 DM이 보이면 터미널에서 Enter.
 
-### 3. 사용
+세션은 저장됩니다. 며칠~몇 주마다 만료되면 다시 하면 됩니다. 인생이 원래 그렇습니다.
 
-Claude Code 에서:
+### 3. 사용법
 
-```
-/mailman        # 최근 5개 스레드
-/mailman 10     # 최근 10개 스레드
-```
+클로드한테 물어보세요.
+
+## 보내기도 됩니다
+
+webhook URL을 설정했다면, 작업 완료 후 Claude가 알아서 그룹 DM에 완료 알림을 보내줍니다.
+
+"프론트 다 했는데요" 를 타이핑하는 것조차 AI가 대신해주는 세상.
 
 ## 요구사항
 
@@ -65,7 +104,17 @@ Claude Code 에서:
 - [bun](https://bun.sh) >= 1.0
 - Google Chrome
 - Claude Code
+- 백엔드가 스펙을 줬다는 사실 (이건 Mailman이 해결 못 합니다)
+
+## 문제 생기면
+
+| 증상 | 처방 |
+|------|------|
+| "로그인 세션이 없거나 만료되었습니다" | `bash ~/.claude/scripts/mailman/run.sh auth` |
+| 아무것도 안 나옴 | config.json의 `botName` 확인. 띄어쓰기 하나 틀려도 안 됨 |
+| 메시지가 깨져 보임 | Google이 DOM을 바꿨을 수 있음. 이슈 남겨주세요 |
+| DB 초기화하고 싶음 | `sqlite3 ~/.claude/inbox/mailman.db "DELETE FROM messages; DELETE FROM meta;"` |
 
 ## 상세 문서
 
-- [scripts/mailman/README.md](scripts/mailman/README.md) — 동작 원리, 환경변수, 트러블슈팅
+- [scripts/mailman/README.md](scripts/mailman/README.md) — 동작 원리, 환경변수, 파일 구조
