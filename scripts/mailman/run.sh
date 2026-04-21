@@ -19,7 +19,7 @@ if [ -z "$PATH_ADDED" ]; then
   export PATH_ADDED=1
 fi
 
-BUN_BIN="$(command -v bun || echo "$HOME/.nvm/versions/node/v24.11.1/bin/bun")"
+BUN_BIN="$(command -v bun || echo "$HOME/.bun/bin/bun")"
 
 if [ ! -x "$BUN_BIN" ]; then
   echo "[mailman] $(date -Iseconds) bun not found at $BUN_BIN" >> "$LOG_FILE"
