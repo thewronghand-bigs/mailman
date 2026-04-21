@@ -1,3 +1,5 @@
+<img width="74" height="74" alt="mailman" src="https://github.com/user-attachments/assets/39bb5114-4ce7-4ad5-928e-caa7bbf941a6" />
+
 # claude-mailman
 
 Google Chat 그룹 DM 에서 특정 봇이 공유한 메시지를 Claude Code `/mailman` 슬래시 커맨드로 가져오는 로컬 파이프라인.
