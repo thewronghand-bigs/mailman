@@ -1,9 +1,9 @@
 #!/bin/bash
 # claude-mailman installer
-# 사용: curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/claude-mailman/main/install.sh | bash
+# 사용: curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/install.sh | bash
 set -euo pipefail
 
-REPO="thewronghand-bigs/claude-mailman"
+REPO="thewronghand-bigs/mailman"
 BRANCH="main"
 BASE_URL="https://raw.githubusercontent.com/$REPO/$BRANCH"
 
@@ -58,10 +58,8 @@ echo ""
 echo "  1. config.json 수정:"
 echo "     vi $SCRIPTS_DIR/config.json"
 echo ""
-echo "     - spaceUrl:  대상 Google Chat 그룹 DM URL"
-echo "     - spaceName: DM 이름 (로그용)"
-echo "     - botName:   추적할 봇 표시 이름 (정확히 일치해야 함)"
-echo "     - webhookUrl: 메시지 전송용 webhook URL (선택)"
+echo "     - spaces: 수집할 DM 별칭과 URL, 봇 설정"
+echo "     - defaultSpace: 기본 스페이스 별칭"
 echo ""
 echo "  2. 최초 로그인:"
 echo "     bash $SCRIPTS_DIR/run.sh auth"

@@ -92,7 +92,7 @@ A. 유감입니다.
 ## 설치
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/claude-mailman/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/install.sh | bash
 ```
 
 bun이 없으면 [여기서](https://bun.sh) 먼저 설치하세요.
