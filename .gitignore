@@ -1,3 +1,4 @@
 scripts/mailman/config.json
 scripts/mailman/node_modules/
 scripts/mailman/bun.lock
+.omc/

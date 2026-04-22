@@ -60,19 +60,29 @@ vi ~/.claude/scripts/mailman/config.json
 
 ```json
 {
-  "spaceUrl": "https://chat.google.com/u/0/app/chat/여기에_스페이스_ID",
-  "spaceName": "내 그룹 DM 이름",
-  "botName": "추적할 봇 표시 이름",
-  "webhookUrl": ""
+  "spaces": {
+    "myspace": {
+      "url": "https://chat.google.com/u/0/app/chat/스페이스_ID",
+      "webhookUrl": "",
+      "bots": {
+        "봇별칭": "봇 표시 이름"
+      },
+      "defaultBot": "봇별칭"
+    }
+  },
+  "defaultSpace": "myspace"
 }
 ```
 
+여러 DM을 등록할 수 있습니다. `spaces` 안에 별칭을 키로 추가하세요.
+
 | 필드 | 뭘 넣어야 하나 | 모르겠으면 |
 |------|----------------|-----------|
-| `spaceUrl` | 그룹 DM URL | 브라우저에서 해당 DM 열고 주소창 복사 |
-| `spaceName` | DM 이름 | 아무거나 써도 됨. 로그에만 찍힘 |
-| `botName` | 봇 표시 이름 | DM에서 봇이 메시지 보낼 때 뜨는 이름. **한 글자라도 다르면 못 잡음** |
-| `webhookUrl` | 전송용 webhook URL | 없으면 비워두세요. 보내기 기능만 안 됨 |
+| `spaces.{별칭}.url` | DM URL | 브라우저에서 해당 DM 열고 주소창 복사 |
+| `spaces.{별칭}.webhookUrl` | 전송용 webhook URL | 없으면 비워두세요. 보내기 기능만 안 됨 |
+| `spaces.{별칭}.bots` | `{ "별칭": "봇 표시 이름" }` | DM에서 봇이 메시지 보낼 때 뜨는 이름. **한 글자라도 다르면 못 잡음** |
+| `spaces.{별칭}.defaultBot` | 기본 봇 별칭 | 생략 시 bots의 첫 번째 |
+| `defaultSpace` | 기본 스페이스 별칭 | `/mailman` 인자 없이 쓸 때 사용 |
 
 ### 2. 최초 로그인 (1회만)
 
@@ -85,6 +95,12 @@ Chrome이 뜹니다. 회사 계정으로 로그인하세요. 그룹 DM이 보이
 세션이 만료되면 다시 로그인하세요.
 
 ### 3. 사용법
+
+```
+/mailman              # 기본 스페이스에서 최근 5개
+/mailman 인준 3        # 인준 스페이스에서 최근 3개
+/mailman tn 희조봇 3   # tn 스페이스에서 희조봇 메시지 3개
+```
 
 클로드한테 물어보세요.
 

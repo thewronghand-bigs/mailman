@@ -1,6 +1,7 @@
 #!/bin/bash
-# claude-mailman: 메시지 전송 (Incoming Webhook 방식)
-# 사용: echo "메시지" | send.sh  또는  cat <<EOF | send.sh ... EOF
+# claude-mailman: 메시지 전송 (Incoming Webhook 방식, 멀티 스페이스 지원)
+# 사용: echo "메시지" | send.sh [스페이스별칭]
+#   별칭 생략 시 defaultSpace 의 webhookUrl 사용
 
 set -o pipefail
 
@@ -8,10 +9,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="$HOME/.claude/logs/mailman.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 
-WEBHOOK_URL="${MAILMAN_WEBHOOK_URL:-$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webhookUrl",""))' "$SCRIPT_DIR/config.json" 2>/dev/null)}"
+SPACE_KEY="${1:-}"
+
+# config.json에서 webhookUrl 추출 (스페이스 별칭 지원)
+WEBHOOK_URL="${MAILMAN_WEBHOOK_URL:-$(python3 -c '
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+key = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else cfg.get("defaultSpace", "")
+spaces = cfg.get("spaces", {})
+if key in spaces:
+    print(spaces[key].get("webhookUrl", ""))
+else:
+    print("")
+' "$SCRIPT_DIR/config.json" "$SPACE_KEY" 2>/dev/null)}"
 
 if [ -z "$WEBHOOK_URL" ]; then
-  echo "[mailman-send] webhookUrl 이 설정되지 않았습니다. config.json 또는 MAILMAN_WEBHOOK_URL 확인."
+  echo "[mailman-send] webhookUrl 이 설정되지 않았습니다. config.json 의 spaces.${SPACE_KEY:-default}.webhookUrl 확인."
   exit 2
 fi
 
@@ -21,7 +34,6 @@ if [ -z "$(printf %s "$MESSAGE" | tr -d '[:space:]')" ]; then
   exit 1
 fi
 
-# JSON payload: {"text": "..."} — 문자열 이스케이프는 python에 위임 (bash 수동 escape 위험)
 PAYLOAD="$(printf %s "$MESSAGE" | python3 -c 'import json,sys; print(json.dumps({"text": sys.stdin.read()}))')"
 
 HTTP_STATUS="$(curl -sS -o /tmp/mailman-send-response.json -w "%{http_code}" \
@@ -31,12 +43,12 @@ HTTP_STATUS="$(curl -sS -o /tmp/mailman-send-response.json -w "%{http_code}" \
   "$WEBHOOK_URL")"
 
 if [ "$HTTP_STATUS" = "200" ]; then
-  echo "[mailman-send] ✅ 전송 완료"
-  echo "[mailman-send] $(date -Iseconds) ✅ sent (HTTP 200)" >> "$LOG_FILE"
+  echo "[mailman-send] ✅ 전송 완료 (space=${SPACE_KEY:-default})"
+  echo "[mailman-send] $(date -Iseconds) ✅ sent (HTTP 200) space=${SPACE_KEY:-default}" >> "$LOG_FILE"
   exit 0
 fi
 
 echo "[mailman-send] ❌ 전송 실패 (HTTP $HTTP_STATUS)"
 cat /tmp/mailman-send-response.json
-echo "[mailman-send] $(date -Iseconds) ❌ fail HTTP=$HTTP_STATUS body=$(cat /tmp/mailman-send-response.json)" >> "$LOG_FILE"
+echo "[mailman-send] $(date -Iseconds) ❌ fail HTTP=$HTTP_STATUS space=${SPACE_KEY:-default} body=$(cat /tmp/mailman-send-response.json)" >> "$LOG_FILE"
 exit 3

@@ -8,7 +8,8 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # 수집 시도 (실패해도 기존 DB 내용은 그대로 출력)
-bash "$SCRIPT_DIR/run.sh" > /dev/null 2>&1 || true
+# 인자를 run.sh에도 전달해서 올바른 스페이스를 수집
+bash "$SCRIPT_DIR/run.sh" "$@" > /dev/null 2>&1 || true
 
 # PATH 확보 (Claude Code 에서 바로 실행될 때 nvm PATH 누락 대비)
 if [ -z "$PATH_ADDED" ]; then

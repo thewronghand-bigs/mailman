@@ -1,13 +1,20 @@
 ---
 description: Google Chat에서 수집한 최신 메시지(API 스펙 등) 가져오기
-argument-hint: "[봇별칭] [개수=5]  예: 희조봇 3"
+argument-hint: "[스페이스] [봇별칭] [개수=5]  예: 인준 3 / tn 희조봇 3"
 allowed-tools: Bash(~/.claude/scripts/mailman/run.sh:*), Bash(~/.claude/scripts/mailman/fetch.sh:*), Bash(~/.claude/scripts/mailman/send.sh:*)
 ---
 
 !`~/.claude/scripts/mailman/fetch.sh $ARGUMENTS`
 
-위는 구글챗 그룹 DM에서 mailman이 수집한 최근 메시지입니다.
+위는 구글챗 DM에서 mailman이 수집한 최근 메시지입니다.
 작업 중인 티켓과 관련된 API 스펙이 있다면 타입 정의와 요청 작성에 활용하세요.
+
+## 스페이스 별칭
+
+- `tn` — MONIFY / TN 그룹 DM (기본)
+- `인준` — 송인준 개인 DM
+
+스페이스를 생략하면 기본 스페이스(tn)에서 가져옵니다.
 
 ## 작업 완료 시 Google Chat 전송 (승인 필수)
 
@@ -31,9 +38,9 @@ allowed-tools: Bash(~/.claude/scripts/mailman/run.sh:*), Bash(~/.claude/scripts/
 2. **사용자 승인 요청** — 초안을 출력한 뒤 "이 내용으로 Google Chat에 전송할까요?" 라고 묻는다.
    승인 전에는 절대 전송하지 않는다. 수정 요청 시 반영 후 재승인 요청.
 
-3. **전송 실행** — 승인되면:
+3. **전송 실행** — 승인되면, 메시지를 가져온 스페이스로 전송:
    ```
-   cat <<'MAILMAN_EOF' | bash ~/.claude/scripts/mailman/send.sh
+   cat <<'MAILMAN_EOF' | bash ~/.claude/scripts/mailman/send.sh [스페이스별칭]
    [초안 내용]
    MAILMAN_EOF
    ```
@@ -57,9 +64,9 @@ allowed-tools: Bash(~/.claude/scripts/mailman/run.sh:*), Bash(~/.claude/scripts/
 2. **사용자 승인 요청** — "이 내용으로 Google Chat에 전송할까요?" 묻기.
    승인 전에는 절대 전송하지 않는다.
 
-3. **전송 실행** — 완료 알림과 동일한 방식:
+3. **전송 실행** — 메시지를 가져온 스페이스로 전송:
    ```
-   cat <<'MAILMAN_EOF' | bash ~/.claude/scripts/mailman/send.sh
+   cat <<'MAILMAN_EOF' | bash ~/.claude/scripts/mailman/send.sh [스페이스별칭]
    [초안 내용]
    MAILMAN_EOF
    ```

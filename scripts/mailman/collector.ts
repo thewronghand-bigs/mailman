@@ -1,11 +1,11 @@
-// claude-mailman: on-demand 수집기
+// claude-mailman: on-demand 수집기 (멀티 스페이스 지원)
 // - auth.ts로 저장된 persistent Chrome 프로필을 재사용해
-//   chat.google.com 의 MONIFY / TN 그룹 DM에서 "API 스펙 Bot" 메시지를 긁어온다.
-// - DB 스키마는 이전 Chat API 버전과 동일하게 유지 → fetch.ts는 손댈 필요 없음.
+//   chat.google.com 의 지정된 스페이스에서 봇 메시지를 긁어온다.
+//
+// 사용: bun run collector.ts [스페이스별칭]
+//   별칭 생략 시 config.json 의 defaultSpace 사용
 //
 // 환경변수:
-//   MAILMAN_SPACE_URL   (optional) 대상 space URL override. 기본 MONIFY/TN 고정.
-//   MAILMAN_BOT_NAME    (optional) 봇 표시 이름. 기본 "API 스펙 Bot"
 //   MAILMAN_HEADLESS    (optional) "1"이면 headless. 기본 headful(안정성 ↑)
 //   MAILMAN_DEBUG       (optional) "1"이면 selector 디버깅 로그
 
@@ -21,17 +21,24 @@ const config = JSON.parse(readFileSync(`${SCRIPT_DIR}/config.json`, "utf8"));
 const PROFILE_DIR = `${homedir()}/.claude/state/mailman-chrome`;
 const DB_PATH = `${homedir()}/.claude/inbox/mailman.db`;
 const CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const SPACE_URL = process.env.MAILMAN_SPACE_URL ?? config.spaceUrl;
-
-// 봇 이름 결정: 환경변수 > CLI 인자(별칭) > defaultBot
-const bots: Record<string, string> = config.bots ?? {};
-const defaultBotAlias: string = config.defaultBot ?? Object.keys(bots)[0] ?? "";
-const botArg = process.argv[2] ?? "";
-const resolvedFromArg = botArg && bots[botArg] ? bots[botArg] : "";
-const BOT_NAME = process.env.MAILMAN_BOT_NAME
-  ?? (resolvedFromArg || bots[defaultBotAlias] || config.botName || "");
 const HEADLESS = process.env.MAILMAN_HEADLESS === "1";
 const DEBUG = process.env.MAILMAN_DEBUG === "1";
+
+// 스페이스 결정: CLI 인자 > defaultSpace
+const spaces: Record<string, { url: string; bots: Record<string, string>; defaultBot: string; webhookUrl: string }> = config.spaces ?? {};
+const spaceArg = process.argv[2] ?? "";
+const spaceKey = spaces[spaceArg] ? spaceArg : config.defaultSpace ?? Object.keys(spaces)[0] ?? "";
+const space = spaces[spaceKey];
+
+if (!space) {
+  console.error(`[mailman] 스페이스를 찾을 수 없습니다: "${spaceArg || "(기본)"}". config.json의 spaces를 확인하세요.`);
+  process.exit(1);
+}
+
+const SPACE_URL = space.url;
+const bots = space.bots ?? {};
+const defaultBotAlias = space.defaultBot ?? Object.keys(bots)[0] ?? "";
+const BOT_NAME = bots[defaultBotAlias] || "";
 
 mkdirSync(dirname(DB_PATH), { recursive: true });
 
@@ -42,7 +49,7 @@ if (!existsSync(PROFILE_DIR)) {
   process.exit(2);
 }
 
-// DB 준비 (기존 스키마 그대로)
+// DB 준비 (space 컬럼 추가)
 const db = new Database(DB_PATH, { create: true });
 db.exec("PRAGMA journal_mode = WAL;");
 db.exec(`
@@ -54,12 +61,14 @@ db.exec(`
     sender_type TEXT,
     text TEXT NOT NULL,
     thread_name TEXT,
+    space TEXT,
     fetched_at TEXT NOT NULL,
     raw_json TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_messages_createTime ON messages(createTime DESC);
   CREATE INDEX IF NOT EXISTS idx_messages_sender_display_name ON messages(sender_display_name);
   CREATE INDEX IF NOT EXISTS idx_messages_sender_name ON messages(sender_name);
+  CREATE INDEX IF NOT EXISTS idx_messages_space ON messages(space);
 
   CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
@@ -67,15 +76,20 @@ db.exec(`
   );
 `);
 
+// 기존 테이블에 space 컬럼이 없으면 추가 (마이그레이션)
+try {
+  db.exec("ALTER TABLE messages ADD COLUMN space TEXT;");
+} catch {
+  // 이미 존재하면 무시
+}
+
 const insertStmt = db.prepare(`
   INSERT OR IGNORE INTO messages
-  (id, createTime, sender_name, sender_display_name, sender_type, text, thread_name, fetched_at, raw_json)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  (id, createTime, sender_name, sender_display_name, sender_type, text, thread_name, space, fetched_at, raw_json)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 // 답장 확장: 각 봇 top-level 메시지에 "N reply/replies" 버튼이 있으면 모두 클릭해서 인라인 확장.
-// 뷰 전환은 없고 같은 페이지에 답장 노드가 추가된다.
-// jsaction="click:QQNHUe" 가 확장 버튼의 안정적 식별자.
 async function expandAllThreads(page: Page): Promise<number> {
   return await page.evaluate(async (botName: string) => {
     const buttons = Array.from(
@@ -83,34 +97,27 @@ async function expandAllThreads(page: Page): Promise<number> {
         "div[role='button'][jsaction*='QQNHUe']",
       ),
     );
-    // 봇 메시지가 포함된 그룹 안의 버튼만 클릭
-    const botButtons = buttons.filter((btn) => {
-      // 버튼의 조상 role='group' 을 찾고, 그 안의 heading 이 봇인지 확인
-      let g: HTMLElement | null = btn;
-      while (g && g.getAttribute("role") !== "group") {
-        g = g.parentElement;
-      }
-      if (!g) return false;
-      const h = g.querySelector<HTMLElement>("[data-message-id][role='heading']");
-      return !!h && (h.innerText ?? "").includes(botName);
-    });
+    const botButtons = botName
+      ? buttons.filter((btn) => {
+          let g: HTMLElement | null = btn;
+          while (g && g.getAttribute("role") !== "group") {
+            g = g.parentElement;
+          }
+          if (!g) return false;
+          const h = g.querySelector<HTMLElement>("[data-message-id][role='heading']");
+          return !!h && (h.innerText ?? "").includes(botName);
+        })
+      : buttons; // 봇 이름이 없으면 모든 스레드 확장
 
     for (const btn of botButtons) {
       btn.click();
-      // 각 클릭 후 DOM 안정화를 위해 짧게 대기
       await new Promise((r) => setTimeout(r, 300));
     }
     return botButtons.length;
-  }, botName);
+  }, BOT_NAME);
 }
 
-// 추출 로직 (2026-04 chat.google.com 기준 실측):
-//  - 메시지 컨테이너: div[role='group'].nF6pT (leaf — 내부에 또 다른 role='group' 이 없는 것)
-//  - 안정 ID: 내부 [data-message-id][role='heading'] 의 data-message-id
-//  - 스레드 그룹핑: 가장 가까운 조상 c-wiz[data-topic-id] 의 data-topic-id → thread_name 에 저장
-//  - 시간: 내부 [data-absolute-timestamp] (Unix ms)
-//  - 봇 필터: heading innerText 가 botName 포함
-//  - 중복 제거: 같은 messageId 가 복수 occurrence 로 나타날 수 있음 (스레드 프리뷰 중복)
+// 추출 로직 (2026-04 chat.google.com 기준 실측)
 async function extractMessages(page: Page): Promise<
   Array<{
     id: string;
@@ -132,7 +139,6 @@ async function extractMessages(page: Page): Promise<
     const allGroups = Array.from(
       document.querySelectorAll<HTMLElement>("div[role='group']"),
     );
-    // leaf group = 자손에 또 다른 role='group' 이 없는 것
     const leafGroups = allGroups.filter(
       (g) => g.querySelectorAll("div[role='group']").length === 0,
     );
@@ -145,7 +151,8 @@ async function extractMessages(page: Page): Promise<
       );
       if (!heading) continue;
       const headingText = heading.innerText ?? "";
-      if (!headingText.includes(botName)) continue;
+      // 봇 이름이 있으면 필터, 없으면 모든 메시지 수집
+      if (botName && !headingText.includes(botName)) continue;
 
       const messageId = heading.getAttribute("data-message-id");
       if (!messageId) continue;
@@ -177,7 +184,7 @@ async function extractMessages(page: Page): Promise<
       }
       if (!createTime) createTime = new Date().toISOString();
 
-      // 본문 정리 (기존 로직 유지)
+      // 본문 정리
       const full = (g.innerText ?? "").trim();
       const headingLines = headingText.split("\n").map((s) => s.trim());
       const headingLinesSet = new Set(headingLines.filter(Boolean));
@@ -190,12 +197,15 @@ async function extractMessages(page: Page): Promise<
         if (tt) timeTexts.add(tt);
       }
 
+      // senderDisplayName: heading 첫 줄 (봇이름 or 발신자 이름)
+      const senderDisplayName = botName || headingLines[0] || "(unknown)";
+
       const isNoiseLine = (raw: string): boolean => {
         const line = raw.trim();
         if (line === "") return true;
         if (line === ",") return true;
         if (line === "App") return true;
-        if (line === botName) return true;
+        if (botName && line === botName) return true;
         if (headingLinesSet.has(line)) return true;
         if (timeTexts.has(line)) return true;
         if (/^,?\s*\d+\s+repl(y|ies)/i.test(line)) return true;
@@ -226,34 +236,29 @@ async function extractMessages(page: Page): Promise<
         id: messageId,
         threadName,
         createTime,
-        senderDisplayName: botName,
+        senderDisplayName,
         text,
       });
     }
 
     return results;
-  }, botName);
+  }, BOT_NAME);
 }
 
 async function ensureLoaded(page: Page): Promise<boolean> {
-  // 로그인 페이지로 리다이렉트 되는지 체크
   await page.waitForLoadState("domcontentloaded").catch(() => {});
   const url = page.url();
   if (url.includes("accounts.google.com") || url.includes("signin")) {
     return false;
   }
-  // 메시지 렌더링 대기: c-wiz[data-topic-id] 가 나타날 때까지
   try {
     await page.waitForSelector("c-wiz[data-topic-id]", { timeout: 15000 });
   } catch {
     if (DEBUG) console.error("[mailman] c-wiz[data-topic-id] 미검출. 진행은 함.");
   }
-  // 초기 로드 후 스크롤/렌더 여유
   await page.waitForTimeout(1500);
   return true;
 }
-
-const botName = BOT_NAME;
 
 const context = await chromium.launchPersistentContext(PROFILE_DIR, {
   headless: HEADLESS,
@@ -274,10 +279,8 @@ try {
     process.exit(3);
   }
 
-  // 1차 수집 전에 스레드 전부 펼치기
   const expanded = await expandAllThreads(page);
   if (DEBUG) console.error(`[mailman] expanded ${expanded} thread(s)`);
-  // 확장된 답장 DOM 안정화 대기
   if (expanded > 0) {
     await page.waitForTimeout(800);
   }
@@ -295,15 +298,17 @@ try {
       "BOT",
       m.text,
       m.threadName,
+      spaceKey,
       now,
-      JSON.stringify({ source: "dom-scrape", ...m }),
+      JSON.stringify({ source: "dom-scrape", space: spaceKey, ...m }),
     );
     if (r.changes > 0) inserted++;
   }
 
   db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('lastSync', ?)").run(now);
+  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)").run(`lastSync:${spaceKey}`, now);
 } finally {
   await context.close().catch(() => {});
 }
 
-console.error(`[mailman] scanned=${scanned} inserted=${inserted} bot="${botName}" space=${SPACE_URL}`);
+console.error(`[mailman] space="${spaceKey}" scanned=${scanned} inserted=${inserted} bot="${BOT_NAME}" url=${SPACE_URL}`);

@@ -28,16 +28,14 @@ fi
 
 cd "$SCRIPT_DIR"
 
-MODE="${1:-collect}"
-
-if [ "$MODE" = "auth" ]; then
+if [ "${1:-}" = "auth" ]; then
   # headful 로그인. 출력은 사용자가 봐야 하므로 stdout/stderr 둘 다 그대로.
   "$BUN_BIN" run auth.ts
   exit $?
 fi
 
-# 수집 모드: stderr만 로그로, stdout은 호출자(슬래시 커맨드)가 받을 수 있게 둔다.
-"$BUN_BIN" run collector.ts 2>> "$LOG_FILE"
+# 수집 모드: 모든 인자를 collector.ts에 전달 (스페이스 별칭 등)
+"$BUN_BIN" run collector.ts "$@" 2>> "$LOG_FILE"
 rc=$?
 
 # exit code 2: 프로필 없음 / 3: 세션 만료 → 사용자에게 힌트
