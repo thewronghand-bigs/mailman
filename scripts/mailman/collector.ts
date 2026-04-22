@@ -139,9 +139,16 @@ async function extractMessages(page: Page): Promise<
     const allGroups = Array.from(
       document.querySelectorAll<HTMLElement>("div[role='group']"),
     );
-    const leafGroups = allGroups.filter(
-      (g) => g.querySelectorAll("div[role='group']").length === 0,
-    );
+    // leaf group = 자손에 실질적 content가 있는 role='group' 이 없는 것
+    // (빈 장식용 div[role='group'] 은 무시)
+    const leafGroups = allGroups.filter((g) => {
+      const childGroups = g.querySelectorAll("div[role='group']");
+      if (childGroups.length === 0) return true;
+      // 모든 child group이 빈 텍스트면 leaf로 취급
+      return Array.from(childGroups).every(
+        (cg) => (cg as HTMLElement).innerText?.trim() === "",
+      );
+    });
 
     const seen = new Set<string>();
 
@@ -197,8 +204,8 @@ async function extractMessages(page: Page): Promise<
         if (tt) timeTexts.add(tt);
       }
 
-      // senderDisplayName: heading 첫 줄 (봇이름 or 발신자 이름)
-      const senderDisplayName = botName || headingLines[0] || "(unknown)";
+      // senderDisplayName: heading 첫 줄에서 실제 발신자 이름 추출
+      const senderDisplayName = headingLines[0] || botName || "(unknown)";
 
       const isNoiseLine = (raw: string): boolean => {
         const line = raw.trim();
