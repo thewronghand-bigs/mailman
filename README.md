@@ -148,6 +148,8 @@ Chrome이 뜹니다. 회사 계정으로 로그인하세요. 그룹 DM이 보이
 ## 보내기도 됩니다
 
 webhook URL을 설정했다면, 작업 완료 후 Claude가 알아서 그룹 DM에 완료 알림을 보내줍니다.
+<img width="735" height="485" alt="image" src="https://github.com/user-attachments/assets/906faa04-af4a-4513-9526-f70e83af6a6e" />
+혹은 백엔드가 잘못된 스펙을 공유했을 경우 항의를 할 수 있습니다. 당신의 권리를 지키세요.
 
 ## 준비물
 
