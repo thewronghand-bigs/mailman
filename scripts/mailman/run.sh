@@ -1,5 +1,5 @@
 #!/bin/bash
-# claude-mailman: on-demand 수집 래퍼
+# mailman: on-demand 수집 래퍼
 # 사용법:
 #   run.sh           → collector 1회 실행 (기본)
 #   run.sh auth      → 최초 로그인 세션 셋업
@@ -10,7 +10,8 @@
 set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_FILE="$HOME/.claude/logs/mailman.log"
+MAILMAN_HOME="${MAILMAN_HOME:-$HOME/.mailman}"
+LOG_FILE="$MAILMAN_HOME/logs/mailman.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 
 # nvm 사용자 기본 node 경로 확보 (launchd 호환성 유지, on-demand 에도 안전)

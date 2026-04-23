@@ -5,15 +5,12 @@
 //   개수 생략 시 5. 봇 별칭 생략 시 해당 스페이스의 모든 메시지.
 
 import { Database } from "bun:sqlite";
-import { homedir } from "node:os";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync } from "node:fs";
+import { getRuntimePaths, loadConfig } from "./runtime";
 
-const SCRIPT_DIR = dirname(new URL(import.meta.url).pathname);
-const config = JSON.parse(readFileSync(`${SCRIPT_DIR}/config.json`, "utf8"));
-const spaces: Record<string, { bots: Record<string, string>; defaultBot?: string }> = config.spaces ?? {};
-
-const DB_PATH = `${homedir()}/.claude/inbox/mailman.db`;
+const paths = getRuntimePaths(import.meta.url);
+const config = loadConfig(paths.scriptDir);
+const spaces: Record<string, { bots?: Record<string, string>; defaultBot?: string }> = config.spaces ?? {};
 
 // 인자 파싱: [스페이스별칭] [봇별칭] [개수] — 순서 자유
 const args = process.argv.slice(2);
@@ -29,7 +26,7 @@ for (const a of args) {
   } else {
     // 각 스페이스의 bots에서 별칭 검색
     for (const [sk, sv] of Object.entries(spaces)) {
-      if (sv.bots[a]) {
+      if (sv.bots?.[a]) {
         botDisplayName = sv.bots[a]!;
         if (!spaceKey) spaceKey = sk; // 봇 별칭으로 스페이스도 유추
         break;
@@ -51,8 +48,8 @@ if (!botDisplayName && space?.bots) {
   }
 }
 
-if (!existsSync(DB_PATH)) {
-  console.log("수집된 데이터가 없습니다. 먼저 `bash ~/.claude/scripts/mailman/run.sh` 를 실행하세요.");
+if (!existsSync(paths.dbPath)) {
+  console.log("수집된 데이터가 없습니다. 먼저 `bash ./scripts/mailman/run.sh` 를 실행하세요.");
   process.exit(0);
 }
 
@@ -64,7 +61,7 @@ type Row = {
   thread_name: string | null;
 };
 
-const db = new Database(DB_PATH, { readonly: true });
+const db = new Database(paths.dbPath, { readonly: true });
 
 // space 컬럼 존재 여부 확인
 let hasSpaceColumn = false;

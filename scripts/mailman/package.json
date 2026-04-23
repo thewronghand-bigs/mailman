@@ -7,7 +7,8 @@
   "scripts": {
     "auth": "bun run auth.ts",
     "collect": "bun run collector.ts",
-    "fetch": "bun run fetch.ts"
+    "fetch": "bun run fetch.ts",
+    "send": "bun run send.ts"
   },
   "dependencies": {
     "playwright": "^1.59.1"

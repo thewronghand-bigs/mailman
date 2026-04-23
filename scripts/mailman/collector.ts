@@ -11,46 +11,36 @@
 
 import { chromium, type Page } from "playwright";
 import { Database } from "bun:sqlite";
-import { homedir } from "node:os";
-import { mkdirSync, existsSync, readFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import {
+  ensureDataDirs,
+  getRuntimePaths,
+  loadConfig,
+  resolveBotDisplayName,
+  resolveChromePath,
+  resolveSpace,
+} from "./runtime";
+import { parseSnapshotJson } from "./snapshot";
 
-const SCRIPT_DIR = dirname(new URL(import.meta.url).pathname);
-const config = JSON.parse(readFileSync(`${SCRIPT_DIR}/config.json`, "utf8"));
-
-const PROFILE_DIR = `${homedir()}/.claude/state/mailman-chrome`;
-const DB_PATH = `${homedir()}/.claude/inbox/mailman.db`;
-const CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const paths = getRuntimePaths(import.meta.url);
+const config = loadConfig(paths.scriptDir);
+const chromePath = resolveChromePath();
 const HEADLESS = process.env.MAILMAN_HEADLESS === "1";
 const DEBUG = process.env.MAILMAN_DEBUG === "1";
+const DRIVER = process.env.MAILMAN_DRIVER || "playwright";
+const SNAPSHOT_FILE = process.env.MAILMAN_SNAPSHOT_FILE || "";
 
-// 스페이스 결정: CLI 인자 > defaultSpace
-const spaces: Record<string, { url: string; bots: Record<string, string>; defaultBot: string; webhookUrl: string }> = config.spaces ?? {};
-const spaceArg = process.argv[2] ?? "";
-const spaceKey = spaces[spaceArg] ? spaceArg : config.defaultSpace ?? Object.keys(spaces)[0] ?? "";
-const space = spaces[spaceKey];
-
-if (!space) {
-  console.error(`[mailman] 스페이스를 찾을 수 없습니다: "${spaceArg || "(기본)"}". config.json의 spaces를 확인하세요.`);
-  process.exit(1);
-}
+const requestedSpaceKey = process.argv[2] ?? "";
+const { spaceKey, space } = resolveSpace(config, requestedSpaceKey);
 
 const SPACE_URL = space.url;
-const bots = space.bots ?? {};
-const defaultBotAlias = space.defaultBot ?? Object.keys(bots)[0] ?? "";
-const BOT_NAME = bots[defaultBotAlias] || "";
+const BOT_NAME = resolveBotDisplayName(space);
+const MENTION_FILTER = space.mentionFilter ?? "";
 
-mkdirSync(dirname(DB_PATH), { recursive: true });
-
-if (!existsSync(PROFILE_DIR)) {
-  console.error(
-    `[mailman] 프로필이 없습니다. 먼저 'bun run auth.ts' 로 로그인하세요. (path=${PROFILE_DIR})`,
-  );
-  process.exit(2);
-}
+ensureDataDirs(paths);
 
 // DB 준비 (space 컬럼 추가)
-const db = new Database(DB_PATH, { create: true });
+const db = new Database(paths.dbPath, { create: true });
 db.exec("PRAGMA journal_mode = WAL;");
 db.exec(`
   CREATE TABLE IF NOT EXISTS messages (
@@ -267,34 +257,25 @@ async function ensureLoaded(page: Page): Promise<boolean> {
   return true;
 }
 
-const context = await chromium.launchPersistentContext(PROFILE_DIR, {
-  headless: HEADLESS,
-  executablePath: CHROME_PATH,
-  viewport: { width: 1280, height: 900 },
-  args: ["--no-first-run", "--no-default-browser-check"],
-});
-
 let inserted = 0;
 let scanned = 0;
-try {
-  const page = context.pages()[0] ?? (await context.newPage());
-  await page.goto(SPACE_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+const now = new Date().toISOString();
 
-  const ok = await ensureLoaded(page);
-  if (!ok) {
-    console.error("[mailman] 로그인 세션이 만료되었습니다. 'bun run auth.ts' 를 다시 실행하세요.");
-    process.exit(3);
+if (DRIVER === "snapshot") {
+  if (!SNAPSHOT_FILE) {
+    console.error("[mailman] MAILMAN_DRIVER=snapshot 인 경우 MAILMAN_SNAPSHOT_FILE 이 필요합니다.");
+    process.exit(1);
+  }
+  if (!existsSync(SNAPSHOT_FILE)) {
+    console.error(`[mailman] snapshot 파일을 찾을 수 없습니다: ${SNAPSHOT_FILE}`);
+    process.exit(1);
   }
 
-  const expanded = await expandAllThreads(page);
-  if (DEBUG) console.error(`[mailman] expanded ${expanded} thread(s)`);
-  if (expanded > 0) {
-    await page.waitForTimeout(800);
-  }
-
-  const msgs = await extractMessages(page);
+  const snapshot = readFileSync(SNAPSHOT_FILE, "utf8");
+  const msgs = parseSnapshotJson(snapshot)
+    .filter((message) => (BOT_NAME ? message.senderDisplayName.includes(BOT_NAME) : true))
+    .filter((message) => (MENTION_FILTER ? message.text.includes(MENTION_FILTER) : true));
   scanned = msgs.length;
-  const now = new Date().toISOString();
 
   for (const m of msgs) {
     const r = insertStmt.run(
@@ -307,15 +288,70 @@ try {
       m.threadName,
       spaceKey,
       now,
-      JSON.stringify({ source: "dom-scrape", space: spaceKey, ...m }),
+      JSON.stringify({ source: "snapshot-import", snapshotFile: SNAPSHOT_FILE, space: spaceKey, ...m }),
     );
     if (r.changes > 0) inserted++;
   }
+} else {
+  if (!existsSync(paths.profileDir)) {
+    console.error(
+      `[mailman] 프로필이 없습니다. 먼저 'bun run auth.ts' 로 로그인하세요. (path=${paths.profileDir})`,
+    );
+    process.exit(2);
+  }
 
-  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('lastSync', ?)").run(now);
-  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)").run(`lastSync:${spaceKey}`, now);
-} finally {
-  await context.close().catch(() => {});
+  const context = await chromium.launchPersistentContext(paths.profileDir, {
+    headless: HEADLESS,
+    executablePath: chromePath,
+    viewport: { width: 1280, height: 900 },
+    args: ["--no-first-run", "--no-default-browser-check"],
+  });
+
+  try {
+    const page = context.pages()[0] ?? (await context.newPage());
+    await page.goto(SPACE_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+
+    const ok = await ensureLoaded(page);
+    if (!ok) {
+      console.error("[mailman] 로그인 세션이 만료되었습니다. 'bun run auth.ts' 를 다시 실행하세요.");
+      process.exit(3);
+    }
+
+    const expanded = await expandAllThreads(page);
+    if (DEBUG) console.error(`[mailman] expanded ${expanded} thread(s)`);
+    if (expanded > 0) {
+      await page.waitForTimeout(800);
+    }
+
+    const allMsgs = await extractMessages(page);
+    const msgs = MENTION_FILTER
+      ? allMsgs.filter((m) => m.text.includes(MENTION_FILTER))
+      : allMsgs;
+    scanned = msgs.length;
+
+    for (const m of msgs) {
+      const r = insertStmt.run(
+        m.id,
+        m.createTime,
+        null,
+        m.senderDisplayName,
+        "BOT",
+        m.text,
+        m.threadName,
+        spaceKey,
+        now,
+        JSON.stringify({ source: "dom-scrape", space: spaceKey, ...m }),
+      );
+      if (r.changes > 0) inserted++;
+    }
+  } finally {
+    await context.close().catch(() => {});
+  }
 }
 
-console.error(`[mailman] space="${spaceKey}" scanned=${scanned} inserted=${inserted} bot="${BOT_NAME}" url=${SPACE_URL}`);
+db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('lastSync', ?)").run(now);
+db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)").run(`lastSync:${spaceKey}`, now);
+
+console.error(
+  `[mailman] driver="${DRIVER}" space="${spaceKey}" scanned=${scanned} inserted=${inserted} bot="${BOT_NAME}" url=${SPACE_URL}`,
+);

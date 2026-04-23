@@ -1,5 +1,5 @@
 #!/bin/bash
-# claude-mailman: 슬래시 커맨드용 수집+출력 래퍼
+# mailman: 수집+출력 래퍼
 # 사용: fetch.sh [limit]
 #   limit 생략 시 5
 
