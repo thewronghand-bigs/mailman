@@ -1,3 +1,9 @@
+---
+name: mailman
+description: Pull recent Google Chat spec messages into the current Codex CLI conversation with a short mailman command.
+user-invokable: true
+---
+
 # Mailman
 
 Use this skill when the user wants to pull recent Google Chat spec messages into the current Codex CLI conversation with a short `mailman` command.

@@ -4,6 +4,7 @@
   "description": "Import Google Chat spec messages into Mailman from a Codex sandbox session.",
   "author": {
     "name": "thewronghand-bigs",
+    "email": "thewronghand@bigs.im",
     "url": "https://github.com/thewronghand-bigs"
   },
   "homepage": "https://github.com/thewronghand-bigs/mailman",
@@ -31,6 +32,8 @@
       "Collect a Chat snapshot in sandbox and show the latest threads.",
       "Use Mailman Sandbox to pull API specs from Google Chat."
     ],
+    "privacyPolicyURL": "https://github.com/thewronghand-bigs/mailman",
+    "termsOfServiceURL": "https://github.com/thewronghand-bigs/mailman",
     "brandColor": "#2563EB"
   }
 }

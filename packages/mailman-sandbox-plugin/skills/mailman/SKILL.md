@@ -1,3 +1,9 @@
+---
+name: mailman
+description: Pull recent Google Chat spec messages into the current Codex sandbox conversation.
+user-invokable: true
+---
+
 # Mailman
 
 Use this skill when Codex is running in a sandboxed session and the user wants the fastest path to pull recent Google Chat spec messages into the current conversation.

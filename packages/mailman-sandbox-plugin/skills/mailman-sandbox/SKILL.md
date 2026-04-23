@@ -1,3 +1,9 @@
+---
+name: mailman-sandbox
+description: Import Google Chat spec messages into Mailman from a Codex sandbox session.
+user-invokable: true
+---
+
 # Mailman Sandbox
 
 Use this skill when Codex is running in a sandboxed session and needs to pull Google Chat spec messages into Mailman without relying on a persistent local Chrome profile.
