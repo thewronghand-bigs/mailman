@@ -1,0 +1,39 @@
+{
+  "name": "mailman-sandbox",
+  "version": "0.1.0",
+  "description": "Import Google Chat spec messages into Mailman from a Codex sandbox session.",
+  "author": {
+    "name": "thewronghand-bigs",
+    "email": "[TODO: author@example.com]",
+    "url": "[TODO: https://github.com/author]"
+  },
+  "homepage": "[TODO: project docs URL]",
+  "repository": "[TODO: repository URL]",
+  "license": "MIT",
+  "keywords": [
+    "google-chat",
+    "sandbox",
+    "mailman"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Mailman Sandbox",
+    "shortDescription": "Import Google Chat specs into Mailman from Codex sandbox.",
+    "longDescription": "Guides Codex through extracting Google Chat messages in a sandbox session, saving a JSON snapshot, and importing it into the shared Mailman runtime.",
+    "developerName": "thewronghand-bigs",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "[TODO: project website URL]",
+    "privacyPolicyURL": "[TODO: privacy policy URL]",
+    "termsOfServiceURL": "[TODO: terms of service URL]",
+    "defaultPrompt": [
+      "Import recent Google Chat spec messages into Mailman.",
+      "Collect a Chat snapshot in sandbox and show the latest threads.",
+      "Use Mailman Sandbox to pull API specs from Google Chat."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

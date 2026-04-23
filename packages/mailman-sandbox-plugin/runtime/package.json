@@ -1,0 +1,7 @@
+{
+  "name": "mailman-sandbox-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Snapshot import runtime for Mailman Codex sandbox plugin",
+  "type": "module"
+}

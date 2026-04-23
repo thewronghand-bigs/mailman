@@ -1,0 +1,13 @@
+{
+  "spaces": {
+    "myspace": {
+      "url": "https://chat.google.com/u/0/app/chat/YOUR_SPACE_ID",
+      "webhookUrl": "",
+      "bots": {
+        "specbot": "Spec Bot"
+      },
+      "defaultBot": "specbot"
+    }
+  },
+  "defaultSpace": "myspace"
+}
