@@ -41,5 +41,6 @@ await new Promise<void>((resolve) => {
   process.stdin.once("data", () => resolve());
 });
 
-await context.close();
+await context.close().catch(() => {});
 console.error("✅ 세션 저장 완료.");
+process.exit(0);
