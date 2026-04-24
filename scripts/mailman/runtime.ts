@@ -61,8 +61,12 @@ export function resolveSpace(config: MailmanConfig, requestedKey?: string) {
   const space = spaces[spaceKey];
 
   if (!space) {
+    const available = Object.keys(spaces);
+    const hint = available.length > 0
+      ? `등록된 스페이스: [${available.join(", ")}]. defaultSpace가 이 중 하나와 일치하는지 확인하세요.`
+      : "spaces에 등록된 스페이스가 없습니다.";
     throw new Error(
-      `[mailman] 스페이스를 찾을 수 없습니다: "${requestedKey || "(기본)"}". config.json의 spaces를 확인하세요.`,
+      `[mailman] 스페이스를 찾을 수 없습니다: "${requestedKey || defaultKey || "(없음)"}". ${hint}`,
     );
   }
 
