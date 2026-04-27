@@ -324,9 +324,24 @@ if (DRIVER === "snapshot") {
     }
 
     const allMsgs = await extractMessages(page);
-    const msgs = MENTION_FILTER
-      ? allMsgs.filter((m) => m.text.includes(MENTION_FILTER))
-      : allMsgs;
+    let msgs = allMsgs;
+    if (MENTION_FILTER) {
+      // 멘션은 스레드 톱 메시지에만 들어간다. 톱(=스레드 내 최초 메시지)이 멘션을 포함하면 그 스레드 전체 통과.
+      const topByThread = new Map<string, string>();
+      for (const m of allMsgs) {
+        const key = m.threadName ?? m.id;
+        const cur = topByThread.get(key);
+        if (!cur || m.createTime < cur) topByThread.set(key, m.createTime);
+      }
+      const passThreads = new Set<string>();
+      for (const m of allMsgs) {
+        const key = m.threadName ?? m.id;
+        if (m.createTime === topByThread.get(key) && m.text.includes(MENTION_FILTER)) {
+          passThreads.add(key);
+        }
+      }
+      msgs = allMsgs.filter((m) => passThreads.has(m.threadName ?? m.id));
+    }
     scanned = msgs.length;
 
     for (const m of msgs) {
