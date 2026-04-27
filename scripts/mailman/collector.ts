@@ -79,32 +79,38 @@ const insertStmt = db.prepare(`
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
-// 답장 확장: 각 봇 top-level 메시지에 "N reply/replies" 버튼이 있으면 모두 클릭해서 인라인 확장.
-async function expandAllThreads(page: Page): Promise<number> {
-  return await page.evaluate(async (botName: string) => {
-    const buttons = Array.from(
-      document.querySelectorAll<HTMLElement>(
-        "div[role='button'][jsaction*='QQNHUe']",
-      ),
-    );
-    const botButtons = botName
-      ? buttons.filter((btn) => {
-          let g: HTMLElement | null = btn;
-          while (g && g.getAttribute("role") !== "group") {
-            g = g.parentElement;
-          }
-          if (!g) return false;
-          const h = g.querySelector<HTMLElement>("[data-message-id][role='heading']");
-          return !!h && (h.innerText ?? "").includes(botName);
-        })
-      : buttons; // 봇 이름이 없으면 모든 스레드 확장
-
-    for (const btn of botButtons) {
-      btn.click();
-      await new Promise((r) => setTimeout(r, 300));
+// 답장이 달린 봇 톱 메시지 topic-id 목록 수집 (페이지 메인 영역 기준).
+async function listThreadsWithReplies(page: Page, botName: string): Promise<string[]> {
+  return await page.evaluate((bn: string) => {
+    const ids: string[] = [];
+    const cwizes = Array.from(document.querySelectorAll<HTMLElement>("c-wiz[data-topic-id]"));
+    for (const cwiz of cwizes) {
+      const tid = cwiz.getAttribute("data-topic-id");
+      if (!tid) continue;
+      const heading = cwiz.querySelector<HTMLElement>("[data-message-id][role='heading']");
+      if (!heading) continue;
+      if (bn && !(heading.innerText ?? "").includes(bn)) continue;
+      const replyBtn = Array.from(cwiz.querySelectorAll<HTMLElement>("[role='button']"))
+        .find((b) => /repl(y|ies)/i.test(b.innerText ?? ""));
+      if (replyBtn) ids.push(tid);
     }
-    return botButtons.length;
-  }, BOT_NAME);
+    return ids;
+  }, botName);
+}
+
+// 특정 topic-id의 reply 버튼 클릭 → 사이드 패널이 열리며 답글이 DOM에 추가됨.
+async function openThreadPanel(page: Page, topicId: string): Promise<boolean> {
+  return await page.evaluate(async (tid: string) => {
+    const cwiz = document.querySelector<HTMLElement>(`c-wiz[data-topic-id='${tid}']`);
+    if (!cwiz) return false;
+    const btn = Array.from(cwiz.querySelectorAll<HTMLElement>("[role='button']"))
+      .find((b) => /repl(y|ies)/i.test(b.innerText ?? ""));
+    if (!btn) return false;
+    btn.scrollIntoView({ block: "center" });
+    await new Promise((r) => setTimeout(r, 200));
+    btn.click();
+    return true;
+  }, topicId);
 }
 
 // 추출 로직 (2026-04 chat.google.com 기준 실측)
@@ -317,13 +323,30 @@ if (DRIVER === "snapshot") {
       process.exit(3);
     }
 
-    const expanded = await expandAllThreads(page);
-    if (DEBUG) console.error(`[mailman] expanded ${expanded} thread(s)`);
-    if (expanded > 0) {
-      await page.waitForTimeout(800);
+    // 1) 톱(메인) 메시지 먼저 수집 (봇 필터 적용)
+    const topMsgs = await extractMessages(page);
+
+    // 2) 답글이 달린 스레드를 하나씩 패널로 열어서 답글 누적 수집
+    //    (사이드 패널은 동시에 1개만 열려서 일괄 클릭 시 마지막 것만 DOM에 남음)
+    const threadsWithReplies = await listThreadsWithReplies(page, BOT_NAME);
+    if (DEBUG) console.error(`[mailman] threads with replies: ${threadsWithReplies.length}`);
+
+    const replyMsgs: typeof topMsgs = [];
+    const seenIds = new Set(topMsgs.map((m) => m.id));
+    for (const tid of threadsWithReplies) {
+      const opened = await openThreadPanel(page, tid);
+      if (!opened) continue;
+      await page.waitForTimeout(1500);
+      const all = await extractMessages(page);
+      for (const m of all) {
+        if (seenIds.has(m.id)) continue;
+        if (m.threadName !== tid) continue;
+        seenIds.add(m.id);
+        replyMsgs.push(m);
+      }
     }
 
-    const allMsgs = await extractMessages(page);
+    const allMsgs = [...topMsgs, ...replyMsgs];
     let msgs = allMsgs;
     if (MENTION_FILTER) {
       // 멘션은 스레드 톱 메시지에만 들어간다. 톱(=스레드 내 최초 메시지)이 멘션을 포함하면 그 스레드 전체 통과.
