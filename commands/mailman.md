@@ -51,6 +51,79 @@ allowed-tools: Bash(~/.claude/scripts/mailman/run.sh:*), Bash(~/.claude/scripts/
    ```
    `✅ 전송 완료` 확인 후 사용자에게 보고. 실패 시 재시도하지 않고 알린다.
 
+## 카드(Cards v2) 형식으로 보내기
+
+작업 완료 알림처럼 **시각적으로 강조가 필요한 메시지**는 일반 텍스트 대신 Google Chat Cards v2 형식을 쓴다.
+헤더 이미지(GIF 포함) + 섹션별 라벨/색상/이탤릭 등이 적용되어 일반 텍스트보다 정보 전달과 분위기 모두 좋다.
+
+`send.sh` 는 텍스트 전용이라 카드는 **`curl` 로 webhook URL에 직접 POST** 한다 (webhookUrl 은 `config.json` 의 해당 스페이스에서 꺼낸다).
+
+### 기본 페이로드 템플릿
+
+```bash
+WEBHOOK=$(node -e 'console.log(require("/Users/euihyeon/.claude/scripts/mailman/config.json").spaces.<스페이스키>.webhookUrl)') && \
+curl -sS -X POST "$WEBHOOK" -H 'Content-Type: application/json; charset=UTF-8' -d @- <<'EOF'
+{
+  "cardsV2": [{
+    "cardId": "ticket-<번호>-<짧은-슬러그>",
+    "card": {
+      "header": {
+        "title": "스껄~",
+        "subtitle": "feat/#<번호> · <상태>",
+        "imageUrl": "https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/scripts/mailman/assets/skrrr-vibrate.gif",
+        "imageType": "SQUARE",
+        "imageAltText": "skrrr vibrate"
+      },
+      "sections": [
+        {
+          "header": "📌 변경 사항",
+          "widgets": [
+            { "textParagraph": { "text": "<b><핵심 한 줄 요약></b>" } },
+            { "textParagraph": { "text": "• <세부 1><br>• <세부 2>" } }
+          ]
+        },
+        {
+          "header": "🚀 상태",
+          "widgets": [
+            { "textParagraph": { "text": "<font color=\"#22c55e\"><b>개발계 배포 완료</b></font>" } }
+          ]
+        },
+        {
+          "header": "💬 클로드의 한마디",
+          "widgets": [
+            { "textParagraph": { "text": "<i><한 줄></i>" } }
+          ]
+        }
+      ]
+    }
+  }]
+}
+EOF
+```
+
+### 컨벤션
+
+- **타이틀**: `스껄~` 고정. 이모지 없음.
+- **서브타이틀**: `<브랜치> · <상태>` (예: `feat/#3208 · 개발계 반영 완료`)
+- **헤더 이미지**: `imageType: "SQUARE"`. URL은 `https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/scripts/mailman/assets/<filename>.gif`
+- **섹션 헤더**: 이모지 + 라벨. 기본 3종 — `📌 변경 사항`, `🚀 상태`, `💬 클로드의 한마디`
+- **본문 (`textParagraph.text`)**: 이모지 없이. HTML은 `<b>`, `<i>`, `<u>`, `<s>`, `<font color="#hex">`, `<a href>`, `<br>` 만 허용. CSS / 그라디언트 / 폰트 사이즈 / 폰트 패밀리는 **불가**.
+- **상태 강조 색**: 성공 = `#22c55e` (초록), 진행 중 = `#3b82f6` (파랑), 경고 = `#f59e0b` (앰버), 실패 = `#ef4444` (빨강)
+- **클로드의 한마디**: 활기차고 귀엽게, 이모지 없이. **`~스껄`체 사용 금지.** 작업 맥락에 맞춰 즉흥 생성 (사용자 승인 받기).
+
+### 사용 가능한 헤더 이미지
+
+`thewronghand-bigs/mailman` repo `scripts/mailman/assets/` 하위:
+- `skrrr-vibrate.gif` — 작업 완료 류 (기본)
+
+새 이미지가 필요하면 사용자에게 받아서 `scripts/mailman/assets/` 에 추가하고 mailman repo 에 커밋/푸시한 뒤 raw URL 로 참조한다.
+
+### 전송 절차 (승인 필수)
+
+1. **카드 페이로드 초안 작성** — 위 템플릿을 채워서 사용자에게 미리보기 (JSON 형태로) 한다.
+2. **사용자 승인 요청** — "이 내용으로 Google Chat에 전송할까요?" 묻기. 톤/문구/이모지 변경 요청 시 반영 후 재승인.
+3. **전송 실행** — `curl` 명령으로 발사. webhook 응답에 `"name": "spaces/..."` 가 보이면 성공.
+
 ## 백엔드에 질문 보내기 (승인 필수)
 
 작업 중 API 스펙에 대해 궁금한 점이 생기면 (nullable 여부, 필드 의미, 예외 케이스 등)
