@@ -8,7 +8,10 @@ export type MailmanSpace = {
   webhookUrl?: string;
   bots?: Record<string, string>;
   defaultBot?: string;
+  /** @deprecated 더 이상 사용되지 않음. 사람 메시지는 @mailman 마커로, 봇은 모두 통과로 변경됨. */
   mentionFilter?: string;
+  /** mailman 자신이 webhook 으로 발사한 카드를 다시 수집하지 않도록 자기 자신 봇 이름(들)을 명시. */
+  selfBotNames?: string[];
 };
 
 export type MailmanConfig = {

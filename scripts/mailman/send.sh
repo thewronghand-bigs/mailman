@@ -6,7 +6,7 @@
 set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MAILMAN_HOME="${MAILMAN_HOME:-$HOME/.mailman}"
+MAILMAN_HOME="${MAILMAN_HOME:-$HOME/.claude}"
 LOG_FILE="$MAILMAN_HOME/logs/mailman.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 

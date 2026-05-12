@@ -38,7 +38,8 @@ const { spaceKey, space } = resolveSpace(config, requestedSpaceKey);
 
 const SPACE_URL = space.url;
 const BOT_NAME = resolveBotDisplayName(space);
-const MENTION_FILTER = space.mentionFilter ?? "";
+// mailman 자신이 webhook 으로 발사한 카드 메시지를 다시 수집하지 않도록 발신자 이름을 명시.
+const SELF_BOT_NAMES = space.selfBotNames ?? [];
 
 ensureDataDirs(paths);
 
@@ -101,16 +102,10 @@ async function listThreadsWithReplies(page: Page, botName: string): Promise<stri
       const senderText = (senderEl.textContent ?? "").trim();
       const isBot = memberId.startsWith("user/bot/");
 
-      // 봇은 봇 이름 매칭 / 사람은 @mailman 마커가 있는 메시지만 수집 대상으로 인정
-      if (isBot) {
-        if (bn && !senderText.includes(bn)) continue;
-      } else {
-        const topText = (cwiz.querySelector<HTMLElement>(
-          "[data-message-id][data-member-id] ~ *",
-        )?.innerText ?? cwiz.innerText ?? "").trim();
-        const firstLine = topText.split("\n").find((l) => l.trim() !== "")?.trim() ?? "";
-        if (!/^@mailman\b/i.test(firstLine)) continue;
-      }
+      // 봇은 모두 통과. 사람은 cwiz 내 어디든 @mailman 마커가 있어야 통과.
+      // (listThreads 단계에선 본문 정리 전이라 정확한 첫 줄 판별이 어려워서
+      //  느슨하게 contains 검사. 정밀 필터링은 extractMessages 가 다시 한다.)
+      if (!isBot && !/@mailman\b/i.test(cwiz.innerText ?? "")) continue;
 
       const replyBtn = Array.from(cwiz.querySelectorAll<HTMLElement>("[role='button']"))
         .find((b) => /repl(y|ies)/i.test(b.innerText ?? ""));
@@ -136,7 +131,10 @@ async function openThreadPanel(page: Page, topicId: string): Promise<boolean> {
 }
 
 // 추출 로직 (2026-04 chat.google.com 기준 실측)
-async function extractMessages(page: Page): Promise<
+async function extractMessages(
+  page: Page,
+  selfBotNames: string[] = [],
+): Promise<
   Array<{
     id: string;
     threadName: string | null;
@@ -145,7 +143,26 @@ async function extractMessages(page: Page): Promise<
     text: string;
   }>
 > {
-  return await page.evaluate((botName: string) => {
+  const evalResult: {
+    results: Array<{
+      id: string;
+      threadName: string | null;
+      createTime: string;
+      senderDisplayName: string;
+      text: string;
+    }>;
+    debug: {
+      leafGroups: number;
+      withSenderEl: number;
+      botCount: number;
+      humanCount: number;
+      noMessageId: number;
+      seenDup: number;
+      emptyText: number;
+      humanNoMarker: number;
+      pushed: number;
+    };
+  } = await page.evaluate(({ botName, selfBotNames: selfNames }: { botName: string; selfBotNames: string[] }) => {
     const results: Array<{
       id: string;
       threadName: string | null;
@@ -153,14 +170,25 @@ async function extractMessages(page: Page): Promise<
       senderDisplayName: string;
       text: string;
     }> = [];
+    const debug = {
+      leafGroups: 0,
+      withSenderEl: 0,
+      botCount: 0,
+      humanCount: 0,
+      noMessageId: 0,
+      seenDup: 0,
+      emptyText: 0,
+      humanNoMarker: 0,
+      pushed: 0,
+    };
 
     const allGroups = Array.from(
-      document.querySelectorAll<HTMLElement>("div[role='group']"),
+      document.querySelectorAll<HTMLElement>("[role='group']"),
     );
     // leaf group = 자손에 실질적 content가 있는 role='group' 이 없는 것
-    // (빈 장식용 div[role='group'] 은 무시)
+    // (빈 장식용 [role='group'] 은 무시)
     const leafGroups = allGroups.filter((g) => {
-      const childGroups = g.querySelectorAll("div[role='group']");
+      const childGroups = g.querySelectorAll("[role='group']");
       if (childGroups.length === 0) return true;
       // 모든 child group이 빈 텍스트면 leaf로 취급
       return Array.from(childGroups).every(
@@ -170,35 +198,30 @@ async function extractMessages(page: Page): Promise<
 
     const seen = new Set<string>();
 
+    debug.leafGroups = leafGroups.length;
     for (const g of leafGroups) {
       // 2026-05 chat.google.com DOM 변경: heading 대신 [data-message-id][data-member-id] 사용.
       const senderEl = g.querySelector<HTMLElement>(
         "[data-message-id][data-member-id]",
       );
       if (!senderEl) continue;
+      debug.withSenderEl++;
       const memberId = senderEl.getAttribute("data-member-id") ?? "";
       const senderText = (senderEl.textContent ?? "").trim();
       const isBot = memberId.startsWith("user/bot/");
+      if (isBot) debug.botCount++; else debug.humanCount++;
 
-      // 사람 메시지는 첫 줄이 `@mailman` 으로 시작해야만 수집 (사람의 일반 잡담 배제).
-      // 봇은 기존대로 봇 이름 매칭만 통과하면 됨.
-      // - 대소문자 무시
-      // - 마커 뒤 공백/콜론 등 어떤 문자가 와도 OK
-      const fullText = (g.innerText ?? "").trim();
-      const firstLine = fullText.split("\n").find((l) => l.trim() !== "")?.trim() ?? "";
-      const MAILMAN_MARKER = /^@mailman\b/i;
-      const hasMailmanMarker = MAILMAN_MARKER.test(firstLine);
+      // mailman 자신이 발사한 카드 메시지는 self-loop 방지를 위해 스킵
+      if (isBot && selfNames.some((n) => senderText.startsWith(n))) continue;
 
-      if (isBot) {
-        if (botName && !senderText.includes(botName)) continue;
-      } else {
-        // 사람 메시지: 마커 없으면 스킵
-        if (!hasMailmanMarker) continue;
-      }
+      // 봇은 모두 통과. 사람은 본문 첫 줄 `@mailman` 마커 체크 (cleaned 본문 기준)
+      // - 마커 매칭은 대소문자 무시, 마커 뒤 공백/콜론 등 어떤 문자가 와도 OK
+      // - 실제 마커 검증은 noise 라인 제거 후의 본문 첫 줄로 한다 (g.innerText 첫 줄은
+      //   보통 발신자 이름이라 마커가 거기 있을 일이 없음)
 
       const messageId = senderEl.getAttribute("data-message-id");
-      if (!messageId) continue;
-      if (seen.has(messageId)) continue;
+      if (!messageId) { debug.noMessageId++; continue; }
+      if (seen.has(messageId)) { debug.seenDup++; continue; }
       seen.add(messageId);
 
       // 호환 유지를 위한 변수 (아래 noise 필터에서 사용)
@@ -277,11 +300,17 @@ async function extractMessages(page: Page): Promise<
       }
 
       let text = cleaned.join("\n").trim();
-      // 마커가 본문 첫 라인 prefix 로 붙어있는 경우 마커만 떼어냄
-      // (예: "@mailman API 변경 안내" → "API 변경 안내")
-      text = text.replace(/^@mailman[:\s]+/i, "").trim();
-      if (!text) continue;
+      if (!text) { debug.emptyText++; continue; }
 
+      // 사람 메시지는 cleaned 본문 첫 줄에 `@mailman` 마커가 있어야 통과.
+      // 봇은 마커 무관하게 모두 통과.
+      if (!isBot) {
+        if (!/^@mailman\b/i.test(text)) { debug.humanNoMarker++; continue; }
+        text = text.replace(/^@mailman[:\s]*/i, "").trim();
+        if (!text) { debug.emptyText++; continue; }
+      }
+
+      debug.pushed++;
       results.push({
         id: messageId,
         threadName,
@@ -291,8 +320,15 @@ async function extractMessages(page: Page): Promise<
       });
     }
 
-    return results;
-  }, BOT_NAME);
+    return { results, debug };
+  }, { botName: BOT_NAME, selfBotNames });
+
+  if (DEBUG) {
+    console.error(
+      `[mailman/extractMessages] debug=${JSON.stringify(evalResult.debug)}`,
+    );
+  }
+  return evalResult.results;
 }
 
 async function ensureLoaded(page: Page): Promise<boolean> {
@@ -306,7 +342,9 @@ async function ensureLoaded(page: Page): Promise<boolean> {
   } catch {
     if (DEBUG) console.error("[mailman] c-wiz[data-topic-id] 미검출. 진행은 함.");
   }
-  await page.waitForTimeout(1500);
+  // c-wiz 가 떠도 내부 메시지 컨텐츠(leaf group / data-message-id 등)는 추가 렌더링이 필요하다.
+  // 1.5초로는 빠른 머신에서도 누락이 자주 나서 5초로 보수적으로 잡는다.
+  await page.waitForTimeout(5000);
   return true;
 }
 
@@ -361,9 +399,9 @@ if (DRIVER === "snapshot") {
   }
 
   const snapshot = readFileSync(SNAPSHOT_FILE, "utf8");
-  const msgs = parseSnapshotJson(snapshot)
-    .filter((message) => (BOT_NAME ? message.senderDisplayName.includes(BOT_NAME) : true))
-    .filter((message) => (MENTION_FILTER ? message.text.includes(MENTION_FILTER) : true));
+  const msgs = parseSnapshotJson(snapshot).filter((message) =>
+    BOT_NAME ? message.senderDisplayName.includes(BOT_NAME) : true,
+  );
   scanned = msgs.length;
 
   for (const m of msgs) {
@@ -413,7 +451,7 @@ if (DRIVER === "snapshot") {
     }
 
     // 1) 톱(메인) 메시지 먼저 수집 (봇 필터 적용)
-    const topMsgs = await extractMessages(page);
+    const topMsgs = await extractMessages(page, SELF_BOT_NAMES);
 
     // 2) 답글이 달린 스레드를 패널로 열어서 답글 누적 수집
     //    (사이드 패널은 동시에 1개만 열려서 일괄 클릭 시 마지막 것만 DOM에 남음)
@@ -429,7 +467,7 @@ if (DRIVER === "snapshot") {
       const opened = await openThreadPanel(page, tid);
       if (!opened) continue;
       await page.waitForTimeout(1500);
-      const all = await extractMessages(page);
+      const all = await extractMessages(page, SELF_BOT_NAMES);
       for (const m of all) {
         if (seenIds.has(m.id)) continue;
         if (m.threadName !== tid) continue;
@@ -438,25 +476,9 @@ if (DRIVER === "snapshot") {
       }
     }
 
-    const allMsgs = [...topMsgs, ...replyMsgs];
-    let msgs = allMsgs;
-    if (MENTION_FILTER) {
-      // 멘션은 스레드 톱 메시지에만 들어간다. 톱(=스레드 내 최초 메시지)이 멘션을 포함하면 그 스레드 전체 통과.
-      const topByThread = new Map<string, string>();
-      for (const m of allMsgs) {
-        const key = m.threadName ?? m.id;
-        const cur = topByThread.get(key);
-        if (!cur || m.createTime < cur) topByThread.set(key, m.createTime);
-      }
-      const passThreads = new Set<string>();
-      for (const m of allMsgs) {
-        const key = m.threadName ?? m.id;
-        if (m.createTime === topByThread.get(key) && m.text.includes(MENTION_FILTER)) {
-          passThreads.add(key);
-        }
-      }
-      msgs = allMsgs.filter((m) => passThreads.has(m.threadName ?? m.id));
-    }
+    // 봇은 모두 통과, 사람은 @mailman 마커로 1차 필터, selfBotNames 는 collector 안에서 스킵.
+    // 별도 mentionFilter 는 더 이상 적용하지 않는다.
+    const msgs = [...topMsgs, ...replyMsgs];
     scanned = msgs.length;
 
     for (const m of msgs) {
