@@ -99,10 +99,19 @@ async function listThreadsWithReplies(page: Page, botName: string): Promise<stri
       if (!senderEl) continue;
       const memberId = senderEl.getAttribute("data-member-id") ?? "";
       const senderText = (senderEl.textContent ?? "").trim();
-      // 봇 필터: data-member-id가 user/bot/* 이거나, 텍스트에 봇 이름 포함
       const isBot = memberId.startsWith("user/bot/");
-      const matchesName = bn ? senderText.includes(bn) : true;
-      if (bn && !isBot && !matchesName) continue;
+
+      // 봇은 봇 이름 매칭 / 사람은 @mailman 마커가 있는 메시지만 수집 대상으로 인정
+      if (isBot) {
+        if (bn && !senderText.includes(bn)) continue;
+      } else {
+        const topText = (cwiz.querySelector<HTMLElement>(
+          "[data-message-id][data-member-id] ~ *",
+        )?.innerText ?? cwiz.innerText ?? "").trim();
+        const firstLine = topText.split("\n").find((l) => l.trim() !== "")?.trim() ?? "";
+        if (!/^@mailman\b/i.test(firstLine)) continue;
+      }
+
       const replyBtn = Array.from(cwiz.querySelectorAll<HTMLElement>("[role='button']"))
         .find((b) => /repl(y|ies)/i.test(b.innerText ?? ""));
       if (replyBtn) ids.push(tid);
@@ -170,8 +179,22 @@ async function extractMessages(page: Page): Promise<
       const memberId = senderEl.getAttribute("data-member-id") ?? "";
       const senderText = (senderEl.textContent ?? "").trim();
       const isBot = memberId.startsWith("user/bot/");
-      // 봇 이름이 있으면 필터: data-member-id가 봇이거나 발신자 텍스트에 봇 이름 포함
-      if (botName && !isBot && !senderText.includes(botName)) continue;
+
+      // 사람 메시지는 첫 줄이 `@mailman` 으로 시작해야만 수집 (사람의 일반 잡담 배제).
+      // 봇은 기존대로 봇 이름 매칭만 통과하면 됨.
+      // - 대소문자 무시
+      // - 마커 뒤 공백/콜론 등 어떤 문자가 와도 OK
+      const fullText = (g.innerText ?? "").trim();
+      const firstLine = fullText.split("\n").find((l) => l.trim() !== "")?.trim() ?? "";
+      const MAILMAN_MARKER = /^@mailman\b/i;
+      const hasMailmanMarker = MAILMAN_MARKER.test(firstLine);
+
+      if (isBot) {
+        if (botName && !senderText.includes(botName)) continue;
+      } else {
+        // 사람 메시지: 마커 없으면 스킵
+        if (!hasMailmanMarker) continue;
+      }
 
       const messageId = senderEl.getAttribute("data-message-id");
       if (!messageId) continue;
@@ -230,6 +253,8 @@ async function extractMessages(page: Page): Promise<
         if (botName && line === botName) return true;
         if (headingLinesSet.has(line)) return true;
         if (timeTexts.has(line)) return true;
+        // 사람 메시지 마커 단독 라인만 noise 처리 (마커 + 본문이 같은 라인이면 아래 후처리에서 마커만 떼어냄)
+        if (/^@mailman[:\s]*$/i.test(line)) return true;
         if (/^,?\s*\d+\s+repl(y|ies)/i.test(line)) return true;
         if (/^,?\s*Last Reply/i.test(line)) return true;
         if (
@@ -251,7 +276,10 @@ async function extractMessages(page: Page): Promise<
         cleaned.pop();
       }
 
-      const text = cleaned.join("\n").trim();
+      let text = cleaned.join("\n").trim();
+      // 마커가 본문 첫 라인 prefix 로 붙어있는 경우 마커만 떼어냄
+      // (예: "@mailman API 변경 안내" → "API 변경 안내")
+      text = text.replace(/^@mailman[:\s]+/i, "").trim();
       if (!text) continue;
 
       results.push({
