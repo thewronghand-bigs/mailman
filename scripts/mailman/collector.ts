@@ -458,7 +458,9 @@ if (DRIVER === "snapshot") {
     //    DEEP 모드: reply 달린 모든 스레드 순회.
     //    기본 모드: 가장 최신 스레드 1개만 펼친다.
     const allThreadsWithReplies = await listThreadsWithReplies(page, BOT_NAME);
-    const threadsWithReplies = DEEP ? allThreadsWithReplies : allThreadsWithReplies.slice(0, 1);
+    // 가벼운 스캔도 답글이 본문 역할을 하는 경우(API 스펙 등)가 많아서 최근 10개 스레드까지 펼친다.
+    // 모든 스레드를 펼치고 싶다면 /mailman-deep 사용.
+    const threadsWithReplies = DEEP ? allThreadsWithReplies : allThreadsWithReplies.slice(0, 10);
     if (DEBUG) console.error(`[mailman] threads with replies: ${threadsWithReplies.length}/${allThreadsWithReplies.length} (deep=${DEEP})`);
 
     const replyMsgs: typeof topMsgs = [];
