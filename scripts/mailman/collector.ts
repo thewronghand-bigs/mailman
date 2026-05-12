@@ -29,6 +29,9 @@ const HEADLESS = process.env.MAILMAN_HEADLESS === "1";
 const DEBUG = process.env.MAILMAN_DEBUG === "1";
 const DRIVER = process.env.MAILMAN_DRIVER || "playwright";
 const SNAPSHOT_FILE = process.env.MAILMAN_SNAPSHOT_FILE || "";
+// MAILMAN_DEEP=1 이면 과거 스레드 lazy-load + reply 달린 모든 스레드 펼침 (무거움).
+// 기본(미설정)은 가벼운 스캔: viewport에 보이는 스레드만 + 최신 reply 스레드 1개만 펼침.
+const DEEP = process.env.MAILMAN_DEEP === "1";
 
 const requestedSpaceKey = process.argv[2] ?? "";
 const { spaceKey, space } = resolveSpace(config, requestedSpaceKey);
@@ -80,6 +83,9 @@ const insertStmt = db.prepare(`
 `);
 
 // 답장이 달린 봇 톱 메시지 topic-id 목록 수집 (페이지 메인 영역 기준).
+// 2026-05 chat.google.com DOM 변경:
+//  - 더이상 [data-message-id][role='heading'] 셀렉터가 존재하지 않음
+//  - 발신자 식별은 [data-message-id][data-member-id] (data-member-id="user/bot/..." 이면 봇)
 async function listThreadsWithReplies(page: Page, botName: string): Promise<string[]> {
   return await page.evaluate((bn: string) => {
     const ids: string[] = [];
@@ -87,9 +93,16 @@ async function listThreadsWithReplies(page: Page, botName: string): Promise<stri
     for (const cwiz of cwizes) {
       const tid = cwiz.getAttribute("data-topic-id");
       if (!tid) continue;
-      const heading = cwiz.querySelector<HTMLElement>("[data-message-id][role='heading']");
-      if (!heading) continue;
-      if (bn && !(heading.innerText ?? "").includes(bn)) continue;
+      const senderEl = cwiz.querySelector<HTMLElement>(
+        "[data-message-id][data-member-id]"
+      );
+      if (!senderEl) continue;
+      const memberId = senderEl.getAttribute("data-member-id") ?? "";
+      const senderText = (senderEl.textContent ?? "").trim();
+      // 봇 필터: data-member-id가 user/bot/* 이거나, 텍스트에 봇 이름 포함
+      const isBot = memberId.startsWith("user/bot/");
+      const matchesName = bn ? senderText.includes(bn) : true;
+      if (bn && !isBot && !matchesName) continue;
       const replyBtn = Array.from(cwiz.querySelectorAll<HTMLElement>("[role='button']"))
         .find((b) => /repl(y|ies)/i.test(b.innerText ?? ""));
       if (replyBtn) ids.push(tid);
@@ -149,18 +162,25 @@ async function extractMessages(page: Page): Promise<
     const seen = new Set<string>();
 
     for (const g of leafGroups) {
-      const heading = g.querySelector<HTMLElement>(
-        "[data-message-id][role='heading']",
+      // 2026-05 chat.google.com DOM 변경: heading 대신 [data-message-id][data-member-id] 사용.
+      const senderEl = g.querySelector<HTMLElement>(
+        "[data-message-id][data-member-id]",
       );
-      if (!heading) continue;
-      const headingText = heading.innerText ?? "";
-      // 봇 이름이 있으면 필터, 없으면 모든 메시지 수집
-      if (botName && !headingText.includes(botName)) continue;
+      if (!senderEl) continue;
+      const memberId = senderEl.getAttribute("data-member-id") ?? "";
+      const senderText = (senderEl.textContent ?? "").trim();
+      const isBot = memberId.startsWith("user/bot/");
+      // 봇 이름이 있으면 필터: data-member-id가 봇이거나 발신자 텍스트에 봇 이름 포함
+      if (botName && !isBot && !senderText.includes(botName)) continue;
 
-      const messageId = heading.getAttribute("data-message-id");
+      const messageId = senderEl.getAttribute("data-message-id");
       if (!messageId) continue;
       if (seen.has(messageId)) continue;
       seen.add(messageId);
+
+      // 호환 유지를 위한 변수 (아래 noise 필터에서 사용)
+      const headingText = senderText;
+      const headingLines = senderText.split("\n").map((s) => s.trim());
 
       // thread_name: 조상 c-wiz[data-topic-id]
       let threadName: string | null = null;
@@ -189,7 +209,6 @@ async function extractMessages(page: Page): Promise<
 
       // 본문 정리
       const full = (g.innerText ?? "").trim();
-      const headingLines = headingText.split("\n").map((s) => s.trim());
       const headingLinesSet = new Set(headingLines.filter(Boolean));
 
       const timeTexts = new Set<string>();
@@ -263,6 +282,42 @@ async function ensureLoaded(page: Page): Promise<boolean> {
   return true;
 }
 
+// 메시지 리스트 컨테이너를 위로 반복 스크롤해 과거 스레드를 lazy-load.
+// 더 이상 새 스레드가 추가되지 않으면 종료.
+async function scrollUpToLoadHistory(page: Page, maxIterations = 20): Promise<void> {
+  let prevCount = 0;
+  let stableCount = 0;
+  for (let i = 0; i < maxIterations; i++) {
+    const count = await page.evaluate(() => {
+      const anyTopic = document.querySelector<HTMLElement>("c-wiz[data-topic-id]");
+      if (!anyTopic) return 0;
+      let node: HTMLElement | null = anyTopic;
+      while (node) {
+        const style = getComputedStyle(node);
+        const overflowY = style.overflowY;
+        const scrollable =
+          (overflowY === "auto" || overflowY === "scroll") &&
+          node.scrollHeight > node.clientHeight;
+        if (scrollable) {
+          node.scrollTop = 0;
+          break;
+        }
+        node = node.parentElement;
+      }
+      return document.querySelectorAll("c-wiz[data-topic-id]").length;
+    });
+    await page.waitForTimeout(1200);
+    if (count === prevCount) {
+      stableCount++;
+      if (stableCount >= 2) break;
+    } else {
+      stableCount = 0;
+    }
+    prevCount = count;
+  }
+  if (DEBUG) console.error(`[mailman] scrollUpToLoadHistory: final topic count=${prevCount}`);
+}
+
 let inserted = 0;
 let scanned = 0;
 const now = new Date().toISOString();
@@ -323,13 +378,22 @@ if (DRIVER === "snapshot") {
       process.exit(3);
     }
 
+    // DEEP 모드에서만 가상 스크롤 영역을 위로 올려 과거 스레드 lazy-load.
+    // 기본 모드는 채팅방 상단으로 끌어올리지 않고 viewport에 보이는 것만 본다.
+    if (DEEP) {
+      await scrollUpToLoadHistory(page);
+    }
+
     // 1) 톱(메인) 메시지 먼저 수집 (봇 필터 적용)
     const topMsgs = await extractMessages(page);
 
-    // 2) 답글이 달린 스레드를 하나씩 패널로 열어서 답글 누적 수집
+    // 2) 답글이 달린 스레드를 패널로 열어서 답글 누적 수집
     //    (사이드 패널은 동시에 1개만 열려서 일괄 클릭 시 마지막 것만 DOM에 남음)
-    const threadsWithReplies = await listThreadsWithReplies(page, BOT_NAME);
-    if (DEBUG) console.error(`[mailman] threads with replies: ${threadsWithReplies.length}`);
+    //    DEEP 모드: reply 달린 모든 스레드 순회.
+    //    기본 모드: 가장 최신 스레드 1개만 펼친다.
+    const allThreadsWithReplies = await listThreadsWithReplies(page, BOT_NAME);
+    const threadsWithReplies = DEEP ? allThreadsWithReplies : allThreadsWithReplies.slice(0, 1);
+    if (DEBUG) console.error(`[mailman] threads with replies: ${threadsWithReplies.length}/${allThreadsWithReplies.length} (deep=${DEEP})`);
 
     const replyMsgs: typeof topMsgs = [];
     const seenIds = new Set(topMsgs.map((m) => m.id));

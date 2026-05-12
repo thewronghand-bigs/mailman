@@ -1,5 +1,5 @@
 ---
-description: Google Chat에서 수집한 최신 메시지(API 스펙 등) 가져오기
+description: Google Chat에서 수집한 최신 메시지(API 스펙 등) 가져오기 (가벼운 스캔)
 argument-hint: "[스페이스] [봇별칭] [개수=5]  예: 인준 3 / tn 희조봇 3"
 allowed-tools: Bash(~/.claude/scripts/mailman/run.sh:*), Bash(~/.claude/scripts/mailman/fetch.sh:*), Bash(~/.claude/scripts/mailman/send.sh:*)
 ---
@@ -8,6 +8,11 @@ allowed-tools: Bash(~/.claude/scripts/mailman/run.sh:*), Bash(~/.claude/scripts/
 
 위는 구글챗 DM에서 mailman이 수집한 최근 메시지입니다.
 작업 중인 티켓과 관련된 API 스펙이 있다면 타입 정의와 요청 작성에 활용하세요.
+
+## 동작 모드
+
+- **`/mailman` (기본 — 가벼운 스캔)**: 채팅방을 위로 끌어올리지 않고 현재 viewport에 보이는 스레드만 수집한다. reply가 달린 스레드는 **가장 최신 1개만** 펼쳐서 답글까지 가져온다. 빠르고 부담 적음.
+- **`/mailman-deep` (무거운 스캔)**: 채팅방을 끝까지 위로 스크롤해 과거 스레드를 lazy-load 하고, reply 달린 **모든 스레드**를 펼쳐 답글까지 수집한다. 채팅방을 처음 인덱싱하거나 한참 동안 안 가져왔을 때만 사용.
 
 ## 스페이스 별칭
 
