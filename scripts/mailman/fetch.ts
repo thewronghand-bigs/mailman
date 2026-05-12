@@ -140,3 +140,43 @@ for (const t of threadRows) {
 
   console.log("\n---\n");
 }
+
+// 메타 정보: 마지막 수집 성공 시각 표시
+// (수집 자체가 실패해도 옛 DB 내용을 그대로 출력하는 구조라
+//  사용자가 "결과가 오래됐는지" 알아채기 어렵기 때문에 노출)
+try {
+  const metaStmt = db.prepare("SELECT value FROM meta WHERE key = ?");
+  const spaceKeyName = spaceKey ? `lastSync:${spaceKey}` : "";
+  const spaceSync = spaceKeyName
+    ? (metaStmt.get(spaceKeyName) as { value: string } | undefined)
+    : undefined;
+  const globalSync = metaStmt.get("lastSync") as
+    | { value: string }
+    | undefined;
+  const lastSync = spaceSync?.value ?? globalSync?.value ?? null;
+
+  console.log("## 메타");
+  if (lastSync) {
+    const ageMs = Date.now() - new Date(lastSync).getTime();
+    const ageMinutes = Math.floor(ageMs / 60000);
+    const ageHours = Math.floor(ageMinutes / 60);
+    const ageDays = Math.floor(ageHours / 24);
+    let ageLabel: string;
+    if (ageDays >= 1) ageLabel = `${ageDays}일 전`;
+    else if (ageHours >= 1) ageLabel = `${ageHours}시간 전`;
+    else if (ageMinutes >= 1) ageLabel = `${ageMinutes}분 전`;
+    else ageLabel = "방금";
+
+    const stale = ageMs > 24 * 60 * 60 * 1000; // 24시간 초과면 stale 표시
+    console.log(`- 마지막 성공 수집: ${lastSync} (${ageLabel})`);
+    if (stale) {
+      console.log(
+        "- ⚠️ 결과가 오래됐을 수 있습니다. 위 stderr 메시지로 수집 실패 여부를 확인하거나 `bash ~/.claude/scripts/mailman/run.sh auth` 로 세션을 갱신하세요.",
+      );
+    }
+  } else {
+    console.log("- 마지막 성공 수집: (기록 없음)");
+  }
+} catch {
+  // 메타 조회 실패는 무시 (출력 자체엔 영향 없음)
+}

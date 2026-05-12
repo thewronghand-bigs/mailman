@@ -9,7 +9,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # 수집 시도 (실패해도 기존 DB 내용은 그대로 출력)
 # 인자를 run.sh에도 전달해서 올바른 스페이스를 수집
-bash "$SCRIPT_DIR/run.sh" "$@" > /dev/null 2>&1 || true
+# - run.sh의 stdout(세션 만료 안내 등)은 stderr로 흘려서
+#   호출자(Claude / 사용자)가 묻히지 않게 볼 수 있도록 한다.
+bash "$SCRIPT_DIR/run.sh" "$@" >&2 || true
 
 # PATH 확보 (Claude Code 에서 바로 실행될 때 nvm PATH 누락 대비)
 if [ -z "$PATH_ADDED" ]; then
