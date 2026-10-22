@@ -1,0 +1,25 @@
+{
+  "header": { "title": "권한 메뉴 조회 API 명칭 변경" },
+  "sections": [
+    {
+      "header": "<b>1. 요약</b>",
+      "widgets": [
+        { "textParagraph": { "text": "<pre><code>GET /menus\n\nAuthorization: Bearer STRING</code></pre>" } },
+        { "textParagraph": { "text": "개발계 반영: 내부 이체내역 → 이체내역" } }
+      ]
+    },
+    {
+      "header": "<b>3. 응답</b>",
+      "widgets": [
+        { "textParagraph": { "text": "<font color=\"#188038\"><b>200 OK</b></font>" } },
+        { "textParagraph": { "text": "<pre><code>{\n  &quot;message&quot;: STRING,\n  &quot;data&quot;: { &quot;menus&quot;: [] }\n}</code></pre>" } }
+      ]
+    },
+    {
+      "header": "<b>4. 실패 응답</b>",
+      "widgets": [
+        { "textParagraph": { "text": "<font color=\"#B3261E\"><b>401</b></font>  인증 실패<br><font color=\"#B3261E\"><b>403</b></font>  권한 없음" } }
+      ]
+    }
+  ]
+}

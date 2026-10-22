@@ -1,89 +1,85 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { isRecord, MailmanError, registerSecret } from "./errors";
 
-export type MailmanSpace = {
-  url: string;
-  webhookUrl?: string;
-  bots?: Record<string, string>;
-  defaultBot?: string;
-  /** @deprecated 더 이상 사용되지 않음. 사람 메시지는 @mailman 마커로, 봇은 모두 통과로 변경됨. */
-  mentionFilter?: string;
-  /** mailman 자신이 webhook 으로 발사한 카드를 다시 수집하지 않도록 자기 자신 봇 이름(들)을 명시. */
-  selfBotNames?: string[];
-};
+export type MailmanSpace = { space: string; webhookUrl?: string };
+export type MailmanConfig = { defaultSpace: string; spaces: Record<string, MailmanSpace> };
+export type Environment = Record<string, string | undefined>;
+export type RuntimePaths = ReturnType<typeof getRuntimePaths>;
 
-export type MailmanConfig = {
-  spaces?: Record<string, MailmanSpace>;
-  defaultSpace?: string;
-};
-
-const LEGACY_MAC_CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-
-export function getScriptDir(importMetaUrl: string): string {
-  return dirname(fileURLToPath(importMetaUrl));
+function expandPath(value: string): string {
+  if (value === "~") return homedir();
+  return resolve(value.startsWith("~/") ? join(homedir(), value.slice(2)) : value);
 }
 
-export function loadConfig(scriptDir: string): MailmanConfig {
-  return JSON.parse(readFileSync(join(scriptDir, "config.json"), "utf8")) as MailmanConfig;
-}
-
-export function getMailmanHome(): string {
-  return process.env.MAILMAN_HOME || join(homedir(), ".claude");
-}
-
-export function getRuntimePaths(importMetaUrl: string) {
-  const scriptDir = getScriptDir(importMetaUrl);
-  const home = getMailmanHome();
-
+export function getRuntimePaths(importMetaUrl: string, env: Environment = process.env) {
+  const defaultHome = join(homedir(), ".claude");
+  const home = expandPath(env.MAILMAN_HOME || defaultHome);
   return {
-    scriptDir,
+    scriptDir: dirname(fileURLToPath(importMetaUrl)),
     home,
-    profileDir: join(home, "state", "mailman-chrome"),
-    dbPath: join(home, "inbox", "mailman.db"),
+    dbPath: join(home, "inbox", "mailman-v2.db"),
     logFile: join(home, "logs", "mailman.log"),
+    // 인증정보는 MAILMAN_HOME과 별도로 지정한다. 데이터만 옮겨도 재로그인이 필요 없다.
+    clientFile: expandPath(env.MAILMAN_CLIENT_FILE || join(defaultHome, "secrets", "mailman-oauth.json")),
+    tokenFile: expandPath(env.MAILMAN_TOKEN_FILE || join(defaultHome, "secrets", "mailman-token.json")),
   };
 }
 
-export function ensureRuntimeDirs(paths: { profileDir: string; dbPath: string; logFile: string }) {
-  mkdirSync(paths.profileDir, { recursive: true });
-  mkdirSync(dirname(paths.dbPath), { recursive: true });
-  mkdirSync(dirname(paths.logFile), { recursive: true });
+export function validateSpace(space: string): void {
+  if (!/^spaces\/[A-Za-z0-9_-]+$/.test(space)) {
+    throw new MailmanError("스페이스는 spaces/SPACE_ID 형식이어야 합니다.");
+  }
 }
 
-export function ensureDataDirs(paths: { dbPath: string; logFile: string }) {
-  mkdirSync(dirname(paths.dbPath), { recursive: true });
-  mkdirSync(dirname(paths.logFile), { recursive: true });
+export function validateThread(space: string, thread: string): void {
+  if (!thread.startsWith(`${space}/threads/`) || !/^spaces\/[A-Za-z0-9_-]+\/threads\/[A-Za-z0-9_.-]+$/.test(thread)) {
+    throw new MailmanError("--thread는 대상 스페이스의 spaces/.../threads/... 이름이어야 합니다.");
+  }
+}
+
+export function loadConfig(scriptDir: string): MailmanConfig {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(join(scriptDir, "config.json"), "utf8"));
+  } catch {
+    throw new MailmanError("config.json을 읽을 수 없습니다. config.example.json을 참고해 v2 설정을 작성하세요.");
+  }
+  if (!isRecord(parsed) || typeof parsed.defaultSpace !== "string" || !isRecord(parsed.spaces)) {
+    throw new MailmanError("config.json에 v2 defaultSpace와 spaces 설정이 필요합니다. config.example.json을 확인하세요.");
+  }
+  const spaces: Record<string, MailmanSpace> = Object.create(null);
+  for (const [alias, value] of Object.entries(parsed.spaces)) {
+    if (!alias || !isRecord(value) || typeof value.space !== "string" ||
+        (value.webhookUrl !== undefined && typeof value.webhookUrl !== "string")) {
+      throw new MailmanError("spaces 항목에 space 이름과 선택적인 webhookUrl 문자열을 지정하세요.");
+    }
+    validateSpace(value.space);
+    if (typeof value.webhookUrl === "string") registerSecret(value.webhookUrl);
+    spaces[alias] = { space: value.space, webhookUrl: value.webhookUrl as string | undefined };
+  }
+  if (!Object.hasOwn(spaces, parsed.defaultSpace)) {
+    throw new MailmanError("defaultSpace가 spaces에 등록된 별칭과 일치하지 않습니다.");
+  }
+  return { defaultSpace: parsed.defaultSpace, spaces };
 }
 
 export function resolveSpace(config: MailmanConfig, requestedKey?: string) {
-  const spaces = config.spaces ?? {};
-  const defaultKey = config.defaultSpace ?? Object.keys(spaces)[0] ?? "";
-  const spaceKey = requestedKey && spaces[requestedKey] ? requestedKey : defaultKey;
-  const space = spaces[spaceKey];
-
-  if (!space) {
-    const available = Object.keys(spaces);
-    const hint = available.length > 0
-      ? `등록된 스페이스: [${available.join(", ")}]. defaultSpace가 이 중 하나와 일치하는지 확인하세요.`
-      : "spaces에 등록된 스페이스가 없습니다.";
-    throw new Error(
-      `[mailman] 스페이스를 찾을 수 없습니다: "${requestedKey || defaultKey || "(없음)"}". ${hint}`,
-    );
+  const spaceKey = requestedKey ?? config.defaultSpace;
+  if (!Object.hasOwn(config.spaces, spaceKey)) {
+    throw new MailmanError("등록되지 않은 스페이스 별칭입니다. config.json의 spaces를 확인하세요.");
   }
-
-  return { spaceKey, space };
+  return { spaceKey, space: config.spaces[spaceKey]! };
 }
 
-export function resolveBotDisplayName(space: MailmanSpace): string {
-  const bots = space.bots ?? {};
-  const defaultBotAlias = space.defaultBot ?? Object.keys(bots)[0] ?? "";
-  return bots[defaultBotAlias] || "";
-}
-
-export function resolveChromePath(): string | undefined {
-  if (process.env.MAILMAN_CHROME_PATH) return process.env.MAILMAN_CHROME_PATH;
-  if (existsSync(LEGACY_MAC_CHROME_PATH)) return LEGACY_MAC_CHROME_PATH;
-  return undefined;
+export function collectionOptions(env: Environment = process.env) {
+  const deep = env.MAILMAN_DEEP === "1";
+  const days = env.MAILMAN_BACKFILL_DAYS;
+  const backfillDays = days === undefined ? (deep ? 30 : 7) : Number(days);
+  if ((days !== undefined && !/^\d+$/.test(days)) || !Number.isSafeInteger(backfillDays) || backfillDays < 1 || backfillDays > 36500) {
+    throw new MailmanError("MAILMAN_BACKFILL_DAYS는 1~36500 사이의 정수여야 합니다.");
+  }
+  return { deep, backfillDays };
 }

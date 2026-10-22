@@ -1,13 +1,9 @@
 {
+  "defaultSpace": "tn",
   "spaces": {
-    "myspace": {
-      "url": "https://chat.google.com/u/0/app/chat/YOUR_SPACE_ID",
-      "webhookUrl": "",
-      "bots": {
-        "봇별칭": "봇 표시 이름"
-      },
-      "defaultBot": "봇별칭"
+    "tn": {
+      "space": "spaces/AAQAgRGQTic",
+      "webhookUrl": ""
     }
-  },
-  "defaultSpace": "myspace"
+  }
 }

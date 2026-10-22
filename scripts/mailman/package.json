@@ -1,16 +1,14 @@
 {
   "name": "claude-mailman",
-  "version": "0.2.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "On-demand scrape Google Chat group DM into a local SQLite inbox for Claude Code",
+  "description": "사용자 OAuth와 Google Chat API로 수집·조회·전송하는 로컬 메일함",
   "type": "module",
   "scripts": {
-    "auth": "bun run auth.ts",
-    "collect": "bun run collector.ts",
-    "fetch": "bun run fetch.ts",
-    "send": "bun run send.ts"
-  },
-  "dependencies": {
-    "playwright": "^1.59.1"
+    "auth": "bun cli.ts run auth",
+    "collect": "bun cli.ts run",
+    "fetch": "bun cli.ts fetch",
+    "send": "bun cli.ts send",
+    "test": "bun test"
   }
 }

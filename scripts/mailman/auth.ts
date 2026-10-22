@@ -1,46 +1,246 @@
-// claude-mailman: 최초 로그인 세션 셋업
-// Chat API 경로가 막혀서, 개인 Chrome 프로필을 재사용하는 방식으로 전환됐다.
-// 이 스크립트는 headful Playwright로 chat.google.com을 띄워서
-// 사용자가 직접 회사 Google 계정으로 로그인하게 한다.
-// 로그인 세션(쿠키)은 PROFILE_DIR에 저장되고, 이후 collector가 같은 프로필을 재사용한다.
+// 사용자 OAuth: 임의 포트 loopback + PKCE. access token은 메모리에서만 사용한다.
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { spawn } from "node:child_process";
+import { createServer } from "node:http";
+import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { isRecord, MailmanError, registerSecret } from "./errors";
+import { requestJson, type Fetch } from "./http";
+import type { RuntimePaths } from "./runtime";
 
-import { chromium } from "playwright";
-import {
-  ensureRuntimeDirs,
-  getRuntimePaths,
-  loadConfig,
-  resolveChromePath,
-  resolveSpace,
-} from "./runtime";
+export const SCOPES = [
+  "openid",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/chat.spaces.readonly",
+  "https://www.googleapis.com/auth/chat.messages.readonly",
+  "https://www.googleapis.com/auth/chat.messages.create",
+] as const;
 
-const paths = getRuntimePaths(import.meta.url);
-const config = loadConfig(paths.scriptDir);
-const { spaceKey, space } = resolveSpace(config, process.argv[2]);
-const chromePath = resolveChromePath();
+export type OAuthClient = { client_id: string; client_secret: string; auth_uri: string; token_uri: string };
+export type SavedToken = { refresh_token: string; email: string; scopes: string[] };
+export type Pkce = { verifier: string; challenge: string; state: string };
 
-ensureRuntimeDirs(paths);
+export function createPkce(): Pkce {
+  const verifier = randomBytes(64).toString("base64url");
+  return {
+    verifier,
+    challenge: createHash("sha256").update(verifier).digest("base64url"),
+    state: randomBytes(32).toString("base64url"),
+  };
+}
 
-console.error(`프로필 경로: ${paths.profileDir}`);
-console.error(`Chrome을 띄웁니다. 회사 Google 계정으로 로그인 후, '${spaceKey}' 대화가 보이는 상태까지 진행해주세요.`);
-console.error("로그인이 끝났으면 이 터미널로 돌아와 Enter를 누르세요.");
+export function authorizationUrl(client: OAuthClient, redirectUri: string, pkce: Pkce): URL {
+  const url = new URL(client.auth_uri);
+  url.search = new URLSearchParams({
+    client_id: client.client_id,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: SCOPES.join(" "),
+    state: pkce.state,
+    code_challenge: pkce.challenge,
+    code_challenge_method: "S256",
+    access_type: "offline",
+    prompt: "consent",
+  }).toString();
+  return url;
+}
 
-const context = await chromium.launchPersistentContext(paths.profileDir, {
-  headless: false,
-  executablePath: chromePath,
-  viewport: { width: 1280, height: 900 },
-  args: ["--no-first-run", "--no-default-browser-check"],
-});
+export function parseOAuthCallback(url: URL, expectedState: string): string {
+  const state = Buffer.from(url.searchParams.get("state") ?? "");
+  const expected = Buffer.from(expectedState);
+  if (state.length !== expected.length || !timingSafeEqual(state, expected)) {
+    throw new MailmanError("OAuth state가 일치하지 않습니다. 다시 run.sh auth를 실행하세요.", 3);
+  }
+  if (url.searchParams.has("error")) {
+    throw new MailmanError("Google 인증이 거부되었습니다. 다시 run.sh auth를 실행하세요.", 3);
+  }
+  const code = url.searchParams.get("code");
+  if (!code || url.searchParams.getAll("code").length !== 1 || url.searchParams.getAll("state").length !== 1) {
+    throw new MailmanError("OAuth 인증 코드가 없습니다. 다시 run.sh auth를 실행하세요.", 3);
+  }
+  return code;
+}
 
-const page = context.pages()[0] ?? (await context.newPage());
-await page.goto(space.url, { waitUntil: "domcontentloaded" });
+function checkScopes(scopes: string[]): string[] {
+  // Google이 email 별칭을 반환하는 경우에도 같은 권한으로 취급한다.
+  const granted = [...new Set(scopes.map(scope => scope === "email" ? SCOPES[1] : scope))];
+  const missing = SCOPES.filter(scope => !granted.includes(scope));
+  if (missing.length > 0) {
+    throw new MailmanError(`필수 스코프가 빠졌습니다: ${missing.join(", ")}. 다시 run.sh auth를 실행하세요.`, 3);
+  }
+  if (granted.some(scope => !(SCOPES as readonly string[]).includes(scope))) {
+    throw new MailmanError("허용 목록 밖의 OAuth 스코프가 있습니다. 이 클라이언트의 기존 동의를 취소한 뒤 다시 run.sh auth를 실행하세요.", 3);
+  }
+  return granted;
+}
 
-// Enter 대기
-process.stdin.setRawMode?.(false);
-process.stdin.resume();
-await new Promise<void>((resolve) => {
-  process.stdin.once("data", () => resolve());
-});
+function scopesFromResponse(body: Record<string, unknown>): string[] {
+  if (typeof body.scope !== "string") throw new MailmanError("OAuth 응답의 허용 스코프를 확인할 수 없습니다.", 3);
+  return checkScopes(body.scope.split(/\s+/).filter(Boolean));
+}
 
-await context.close().catch(() => {});
-console.error("✅ 세션 저장 완료.");
-process.exit(0);
+export function loadClient(path: string): OAuthClient {
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new MailmanError("OAuth 클라이언트 파일을 읽을 수 없습니다. MAILMAN_CLIENT_FILE과 데스크톱 앱 JSON 파일을 확인하세요.");
+  }
+  if (!isRecord(value) || !isRecord(value.installed)) {
+    throw new MailmanError('OAuth 클라이언트는 Google의 {"installed": {...}} 형식이어야 합니다.');
+  }
+  const client = value.installed;
+  if (typeof client.client_id !== "string" || !client.client_id || typeof client.client_secret !== "string" || !client.client_secret ||
+      typeof client.auth_uri !== "string" || !["https://accounts.google.com/o/oauth2/auth", "https://accounts.google.com/o/oauth2/v2/auth"].includes(client.auth_uri) ||
+      client.token_uri !== "https://oauth2.googleapis.com/token") {
+    throw new MailmanError("Google 데스크톱 앱 OAuth 클라이언트의 필수 필드와 인증 주소를 확인하세요.");
+  }
+  registerSecret(client.client_secret);
+  return { client_id: client.client_id, client_secret: client.client_secret, auth_uri: client.auth_uri, token_uri: client.token_uri };
+}
+
+export function loadToken(path: string): SavedToken {
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error: unknown) {
+    if (isRecord(error) && error.code === "ENOENT") {
+      throw new MailmanError("토큰 파일이 없습니다. 먼저 run.sh auth를 실행하세요.", 2);
+    }
+    throw new MailmanError("토큰 파일을 읽을 수 없습니다. 다시 run.sh auth를 실행하세요.", 3);
+  }
+  if (!isRecord(value) || typeof value.refresh_token !== "string" || !value.refresh_token ||
+      typeof value.email !== "string" || !/^[^@\s]+@[^@\s]+$/.test(value.email) ||
+      !Array.isArray(value.scopes) || !value.scopes.every((scope: unknown) => typeof scope === "string")) {
+    throw new MailmanError("토큰 파일 형식이 올바르지 않습니다. 다시 run.sh auth를 실행하세요.", 3);
+  }
+  registerSecret(value.refresh_token);
+  return { refresh_token: value.refresh_token, email: value.email, scopes: checkScopes(value.scopes) };
+}
+
+export function saveToken(path: string, token: SavedToken): void {
+  registerSecret(token.refresh_token);
+  const temporary = join(dirname(path), `.mailman-token-${randomBytes(12).toString("hex")}`);
+  let fd: number | undefined;
+  try {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    fd = openSync(temporary, "wx", 0o600);
+    // 객체를 명시해서 access_token/id_token이 파일에 섞여 들어갈 수 없게 한다.
+    writeFileSync(fd, JSON.stringify({ refresh_token: token.refresh_token, email: token.email, scopes: token.scopes }, null, 2) + "\n");
+    closeSync(fd);
+    fd = undefined;
+    chmodSync(temporary, 0o600);
+    renameSync(temporary, path);
+  } catch {
+    throw new MailmanError("토큰 파일을 저장할 수 없습니다. MAILMAN_TOKEN_FILE의 디렉터리 권한을 확인하세요.");
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+    try { unlinkSync(temporary); } catch { /* 이동 완료 또는 임시 파일 없음 */ }
+  }
+}
+
+async function tokenRequest(client: OAuthClient, params: Record<string, string>, fetcher: Fetch): Promise<Record<string, unknown>> {
+  const { response, body } = await requestJson(fetcher, client.token_uri, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ ...params, client_id: client.client_id, client_secret: client.client_secret }),
+  });
+  if (isRecord(body) && typeof body.access_token === "string") registerSecret(body.access_token);
+  if (isRecord(body) && typeof body.refresh_token === "string") registerSecret(body.refresh_token);
+  if (isRecord(body) && body.error === "invalid_grant") {
+    throw new MailmanError("OAuth 인증이 만료되었거나 취소되었습니다. 다시 run.sh auth를 실행하세요.", 3);
+  }
+  if (!response.ok || !isRecord(body) || typeof body.access_token !== "string" || !body.access_token) {
+    // error_description에는 요청의 비밀값이 섞일 수 있어서 그대로 출력하지 않는다.
+    throw new MailmanError(`OAuth 토큰 발급 실패 (HTTP ${response.status}). OAuth 설정을 확인하거나 다시 run.sh auth를 실행하세요.`, 3);
+  }
+  return body;
+}
+
+export async function exchangeCode(client: OAuthClient, code: string, redirectUri: string, verifier: string, fetcher: Fetch = fetch) {
+  const body = await tokenRequest(client, {
+    grant_type: "authorization_code", code, redirect_uri: redirectUri, code_verifier: verifier,
+  }, fetcher);
+  if (typeof body.refresh_token !== "string" || !body.refresh_token) {
+    throw new MailmanError("refresh token을 받지 못했습니다. 다시 run.sh auth를 실행해 동의하세요.", 3);
+  }
+  const scopes = scopesFromResponse(body);
+  const accessToken = body.access_token as string;
+  const { response, body: user } = await requestJson(fetcher, "https://openidconnect.googleapis.com/v1/userinfo", {
+    method: "GET", headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok || !isRecord(user) || typeof user.email !== "string" || !/^[^@\s]+@[^@\s]+$/.test(user.email) || user.email_verified !== true) {
+    throw new MailmanError(`Google 계정 이메일을 확인할 수 없습니다 (HTTP ${response.status}).`, 3);
+  }
+  return { refresh_token: body.refresh_token, email: user.email, scopes } satisfies SavedToken;
+}
+
+export async function getAccessToken(paths: Pick<RuntimePaths, "clientFile" | "tokenFile">, fetcher: Fetch = fetch): Promise<string> {
+  // 파일이 없으면 클라이언트 확인이나 네트워크 호출보다 먼저 exit 2로 안내한다.
+  const saved = loadToken(paths.tokenFile);
+  const client = loadClient(paths.clientFile);
+  const body = await tokenRequest(client, { grant_type: "refresh_token", refresh_token: saved.refresh_token }, fetcher);
+  if (body.scope !== undefined) scopesFromResponse(body);
+  if (typeof body.refresh_token === "string" && body.refresh_token !== saved.refresh_token) {
+    saveToken(paths.tokenFile, { ...saved, refresh_token: body.refresh_token });
+  }
+  return body.access_token as string;
+}
+
+async function openBrowser(url: URL): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("open", [url.toString()], { stdio: "ignore" });
+    child.once("error", () => reject(new MailmanError("macOS open으로 브라우저를 열 수 없습니다.")));
+    child.once("exit", code => code === 0 ? resolve() : reject(new MailmanError("브라우저 실행에 실패했습니다.")));
+  });
+}
+
+async function receiveAuthorization(client: OAuthClient, pkce: Pkce): Promise<{ code: string; redirectUri: string }> {
+  let resolveCode: (code: string) => void = () => {};
+  let rejectCode: (error: MailmanError) => void = () => {};
+  const callback = new Promise<string>((resolve, reject) => { resolveCode = resolve; rejectCode = reject; });
+  // 브라우저 실행 중 콜백이 먼저 실패해도 처리되지 않은 rejection이 생기지 않게 한다.
+  void callback.catch(() => {});
+  const server = createServer((request, response) => {
+    try {
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+      if (request.method !== "GET" || url.pathname !== "/") {
+        response.writeHead(404).end();
+        return;
+      }
+      const code = parseOAuthCallback(url, pkce.state);
+      response.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" })
+        .end("인증 코드를 받았습니다. 터미널에서 인증 완료 여부를 확인하세요. 이 탭은 닫아도 됩니다.");
+      resolveCode(code);
+    } catch {
+      response.writeHead(400, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" }).end("인증에 실패했습니다. 터미널에서 다시 시도하세요.");
+      rejectCode(new MailmanError("OAuth 콜백 검증에 실패했습니다. 다시 run.sh auth를 실행하세요.", 3));
+    }
+  });
+  server.on("error", () => rejectCode(new MailmanError("OAuth loopback 서버 오류가 발생했습니다.", 3)));
+  const timeout = setTimeout(() => rejectCode(new MailmanError("인증 대기 시간이 5분을 넘었습니다. 다시 run.sh auth를 실행하세요.", 3)), 5 * 60_000);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", () => reject(new MailmanError("OAuth loopback 서버를 열 수 없습니다.")));
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new MailmanError("OAuth loopback 포트를 확인할 수 없습니다.");
+    const redirectUri = `http://127.0.0.1:${address.port}`;
+    await openBrowser(authorizationUrl(client, redirectUri, pkce));
+    return { code: await callback, redirectUri };
+  } finally {
+    clearTimeout(timeout);
+    server.close();
+    server.closeAllConnections();
+  }
+}
+
+export async function authenticate(paths: Pick<RuntimePaths, "clientFile" | "tokenFile">): Promise<SavedToken> {
+  const client = loadClient(paths.clientFile);
+  const pkce = createPkce();
+  const { code, redirectUri } = await receiveAuthorization(client, pkce);
+  const token = await exchangeCode(client, code, redirectUri, pkce.verifier);
+  saveToken(paths.tokenFile, token);
+  return token;
+}
