@@ -53,7 +53,7 @@ ensure_bun() {
 }
 
 install_runtime() {
-  local script_files="auth.ts collector.ts fetch.ts fetch.sh run.sh send.sh send.ts runtime.ts snapshot.ts package.json config.example.json README.md"
+  local script_files="auth.ts chat.ts cli.ts collector.ts content.ts errors.ts fetch.ts fetch.sh http.ts lib.sh run.sh send.sh send.ts runtime.ts store.ts time.ts package.json config.example.json README.md"
 
   mkdir -p "$SCRIPTS_DIR"
   for f in $script_files; do
@@ -70,16 +70,14 @@ install_runtime() {
   fi
 
   ensure_bun || return 1
-  (
-    cd "$SCRIPTS_DIR"
-    "$BUN_BIN" install --silent 2>/dev/null || "$BUN_BIN" install
-  )
+  # v2는 외부 의존성이 없어 bun install이 필요 없다.
 }
 
 install_claude_adapter() {
   mkdir -p "$COMMANDS_DIR"
   download_file "commands/mailman.md" "$COMMANDS_DIR/mailman.md"
-  echo "[mailman] Claude Code /mailman 어댑터를 설치했습니다."
+  download_file "commands/mailman-deep.md" "$COMMANDS_DIR/mailman-deep.md"
+  echo "[mailman] Claude Code /mailman, /mailman-deep 어댑터를 설치했습니다."
 }
 
 install_codex_cli_adapter() {
@@ -151,7 +149,7 @@ print_next_steps() {
   echo "  1. 공용 런타임 설정:"
   echo "     vi $SCRIPTS_DIR/config.json"
   echo ""
-  echo "  2. 최초 로그인:"
+  echo "  2. Google 데스크톱 앱 OAuth JSON을 ~/.claude/secrets/mailman-oauth.json에 저장한 뒤 최초 로그인:"
   echo "     bash $SCRIPTS_DIR/run.sh auth"
   echo ""
 
@@ -170,7 +168,7 @@ print_next_steps() {
   if [ "$INSTALL_TARGET" = "codex" ] || [ "$INSTALL_TARGET" = "all" ]; then
     echo "  5. Codex CLI:"
     echo "     mailman"
-    echo "     mailman tn specbot 3"
+    echo "     mailman tn 3"
     echo ""
     echo "  6. Codex 샌드박스:"
     echo "     plugin 목록이 갱신되지 않으면 Codex 를 재시작하세요."

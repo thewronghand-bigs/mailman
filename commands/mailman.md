@@ -1,36 +1,43 @@
 ---
-description: Google Chat에서 수집한 최신 메시지(API 스펙 등) 가져오기 (가벼운 스캔)
-argument-hint: "[스페이스] [봇별칭] [개수=5]  예: 인준 3 / tn 희조봇 3"
+description: Google Chat API로 증분 수집하고 최신 스레드(API 스펙 등) 가져오기
+argument-hint: "[스페이스] [개수=5] [--all]  예: tn 3 / 인준 5 --all"
 allowed-tools: Bash(~/.claude/scripts/mailman/run.sh:*), Bash(~/.claude/scripts/mailman/fetch.sh:*), Bash(~/.claude/scripts/mailman/send.sh:*)
 ---
 
 !`~/.claude/scripts/mailman/fetch.sh $ARGUMENTS`
 
-위는 구글챗 DM에서 mailman이 수집한 최근 메시지입니다.
+위는 Google Chat API로 수집한 최근 스레드입니다.
 작업 중인 티켓과 관련된 API 스펙이 있다면 타입 정의와 요청 작성에 활용하세요.
 
 ## 동작 모드
 
-- **`/mailman` (기본 — 가벼운 스캔)**: 채팅방을 위로 끌어올리지 않고 현재 viewport에 보이는 스레드만 수집한다. reply가 달린 스레드는 **최근 10개까지** 펼쳐서 답글 본문을 함께 가져온다. 빠르고 부담 적음.
-- **`/mailman-deep` (무거운 스캔)**: 채팅방을 끝까지 위로 스크롤해 과거 스레드를 lazy-load 하고, reply 달린 **모든 스레드**를 펼쳐 답글까지 수집한다. 채팅방을 처음 인덱싱하거나 한참 동안 안 가져왔을 때만 사용.
+- **`/mailman` (기본)**: 최초에는 최근 7일, 이후에는 스페이스별 마지막 `createTime` 이후를 증분 수집한다.
+- **`/mailman-deep`**: meta와 관계없이 **최근 30일 백필 재수집** 후 조회한다. 과거 메시지의 수정분을 갱신하거나 누락된 맥락을 보완할 때 쓴다. `MAILMAN_BACKFILL_DAYS`로 창을 바꿀 수 있다.
+- 개수는 최신 스레드 수(1~50), 기본 5개다. `--all`은 조회 필터를 해제한다.
+- 수집 실패 시에도 기존 DB 내용을 출력하므로 오류 안내와 마지막 성공 수집 시각을 확인한다.
 
-## 수집 대상
+## 저장과 조회 대상
 
-기본 수집 대상은 두 종류다:
+스페이스의 모든 메시지를 원문 그대로 저장하고, 조회 시 다음 조건으로 스레드를 고른다:
 
-1. **봇 메시지 전부** — 채팅방에 등장하는 모든 봇(`data-member-id="user/bot/..."`) 메시지는 이름 매칭 없이 자동 수집한다 (예: Codex, 미래봇 등).
-2. **사람 메시지 중 `@mailman` 마커 붙은 것** — 사람 발신자(개인 계정)는 채팅방에 잡담도 많이 섞이므로, 본문 **첫 줄이 `@mailman` 으로 시작**해야만 수집한다 (대소문자 무시).
+1. **봇 메시지 전부** — API의 `sender.type=BOT`이면 이름 매칭 없이 통과한다.
+2. **사람 메시지 중 `@mailman` 마커 붙은 것** — `sender.type=HUMAN`이고 본문 **첫 줄이 `@mailman`으로 시작**해야 통과한다 (대소문자 무시).
    - 예: 최미래님이 본인 계정에서 API 스펙을 공유할 때 `@mailman API 스펙 변경...` 식으로 첫 줄에 마커를 붙임.
-   - 저장 시 마커는 떼고 본문만 남는다.
+   - 마커는 DB에 보존하고 출력할 때만 제거한다.
+
+`[🤖 Claude]`로 시작하는 mailman 전송 메시지는 기본 필터에서 제외한다. `--all`은 이 메시지와 일반 대화도 포함한다.
+
+최신 필터 통과 메시지 순으로 스레드를 고르며, 각 스레드 안에서는 **저장된 답글 전부**를 필터와 관계없이 시간순으로 보여준다. 출력 머리의 `thread_name`은 답글 전송에 사용하고 첫 메시지 `name`은 DB 기준이다. 수집 창 밖의 과거 원문/답글이 없으면 백필 기간을 늘려야 한다.
+
+`cardsV2`와 구형 `cards`의 카드 본문은 제목·섹션·코드블록·버튼 링크를 포함한 마크다운 텍스트로 펼쳐진다. 텍스트와 카드가 함께 있으면 텍스트가 먼저 나온다. 멘션과 카드가 별도 메시지여도 같은 스레드에 저장되어 있으면 둘 다 표시한다.
 
 사용자가 "특정 발신자 메시지만 보여줘" 같이 요청하면 `/mailman` 결과에서 발신자 기준으로 필터링해서 보여주면 된다.
 
 ## 스페이스 별칭
 
-- `tn` — MONIFY / TN 그룹 DM (기본)
-- `인준` — 송인준 개인 DM
+`config.json`의 `spaces`에 등록된 별칭을 쓴다. 생략하면 `defaultSpace`를 사용한다. 봇별칭 인자는 없다.
 
-스페이스를 생략하면 기본 스페이스(tn)에서 가져옵니다.
+최초 인증은 `bash ~/.claude/scripts/mailman/run.sh auth`. 토큰이 없거나 `invalid_grant` 안내가 나오면 이 명령으로 다시 인증한다.
 
 ## 작업 완료 시 Google Chat 전송 (승인 필수)
 
@@ -60,19 +67,40 @@ allowed-tools: Bash(~/.claude/scripts/mailman/run.sh:*), Bash(~/.claude/scripts/
    [초안 내용]
    MAILMAN_EOF
    ```
-   `✅ 전송 완료` 확인 후 사용자에게 보고. 실패 시 재시도하지 않고 알린다.
+   `send.sh`는 **OAuth로 로그인한 사용자 명의**로 `[🤖 Claude] ` 태그를 본문 앞에 자동으로 붙인다. 초안 미리보기에도 이 태그와 전송 대상 스페이스/스레드를 명시한다.
+
+   원 스레드에 답글을 달려면 출력의 `thread_name`을 사용한다:
+   ```bash
+   cat <<'MAILMAN_EOF' | bash ~/.claude/scripts/mailman/send.sh [스페이스별칭] --thread spaces/SPACE_ID/threads/THREAD_ID
+   [초안 내용]
+   MAILMAN_EOF
+   ```
+   태그를 본문에 직접 중복해서 넣지 않는다. API가 해당 스레드에 답글을 달 수 없으면 새 스레드로 전환한다.
+   `✅ 전송 완료`와 생성된 message/thread 이름 확인 후 보고한다. 실패 시 재시도하지 않고 알린다.
+
+## 텍스트 전송 서식
+
+사용자 명의 메시지는 **마크다운**(`MARKUP_SYNTAX_MARKDOWN`)으로 해석된다. 웹훅·봇의 Chat 전용 문법과 다르다. 2026-10-22 실제 전송으로 확인한 결과:
+
+- **줄바꿈 한 번은 무시되고 앞 줄에 이어 붙는다.** 문단을 나누려면 빈 줄을 넣는다.
+- `*텍스트*`·`_텍스트_` → 기울임. 굵게는 `**텍스트**`(표준 마크다운 기준, 미검증).
+- `~텍스트~` → 취소선, `` `코드` `` → 인라인 코드, ```` ``` ```` 블록 → 코드블록(줄바꿈 유지).
+- `- 항목` → 글머리표 목록.
+- `<url|라벨>` 링크 문법은 **동작하지 않는다**(글자 그대로 노출). URL은 그대로 쓰면 자동 링크된다. 라벨 링크가 필요하면 `[라벨](url)`(미검증).
+- `<users/USER_ID>` → 실제 멘션(알림 발생).
+- 앱 구성 이름(`mailman`)이 발신자 옆에 표시된다.
 
 ## 카드(Cards v2) 형식으로 보내기
 
 작업 완료 알림처럼 **시각적으로 강조가 필요한 메시지**는 일반 텍스트 대신 Google Chat Cards v2 형식을 쓴다.
 헤더 이미지(GIF 포함) + 섹션별 라벨/색상/이탤릭 등이 적용되어 일반 텍스트보다 정보 전달과 분위기 모두 좋다.
 
-`send.sh` 는 텍스트 전용이라 카드는 **`curl` 로 webhook URL에 직접 POST** 한다 (webhookUrl 은 `config.json` 의 해당 스페이스에서 꺼낸다).
+사용자 OAuth는 `cardsV2`를 보낼 수 없다. `send.sh`는 텍스트 전용이며, 카드는 기존처럼 **`curl`로 webhook URL에 직접 POST** 한다 (`webhookUrl`은 `config.json`의 해당 스페이스에서 꺼낸다). 웹훅 URL은 터미널/로그에 출력하지 않는다.
 
 ### 기본 페이로드 템플릿
 
 ```bash
-WEBHOOK=$(node -e 'console.log(require("/Users/euihyeon/.claude/scripts/mailman/config.json").spaces.<스페이스키>.webhookUrl)') && \
+WEBHOOK=$(bun -e 'const c = await Bun.file(`${process.env.HOME}/.claude/scripts/mailman/config.json`).json(); process.stdout.write(c.spaces["tn"].webhookUrl)') && \
 curl -sS -X POST "$WEBHOOK" -H 'Content-Type: application/json; charset=UTF-8' -d @- <<'EOF'
 {
   "cardsV2": [{
@@ -112,15 +140,17 @@ curl -sS -X POST "$WEBHOOK" -H 'Content-Type: application/json; charset=UTF-8' -
 EOF
 ```
 
+`tn`은 승인받은 전송 대상 별칭으로 바꾼다. `WEBHOOK` 변수 값 자체는 출력하지 않는다.
+
 ### 컨벤션
 
 - **타이틀**: `스껄~` 고정. 이모지 없음.
 - **서브타이틀**: `<브랜치> · <상태>` (예: `feat/#3208 · 개발계 반영 완료`)
-- **헤더 이미지**: `imageType: "SQUARE"`. URL은 `https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/scripts/mailman/assets/<filename>.gif`
+- **헤더 이미지**: `imageType: "SQUARE"`. 기존 GIF는 `https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/scripts/mailman/assets/<filename>.gif`
 - **섹션 헤더**: 이모지 + 라벨. 기본 3종 — `📌 변경 사항`, `🚀 상태`, `💬 클로드의 한마디`
 - **본문 (`textParagraph.text`)**: 이모지 없이. HTML은 `<b>`, `<i>`, `<u>`, `<s>`, `<font color="#hex">`, `<a href>`, `<br>` 만 허용. CSS / 그라디언트 / 폰트 사이즈 / 폰트 패밀리는 **불가**.
 - **상태 강조 색**: 성공 = `#22c55e` (초록), 진행 중 = `#3b82f6` (파랑), 경고 = `#f59e0b` (앰버), 실패 = `#ef4444` (빨강)
-- **클로드의 한마디**: 기본 `스껄.` 한 단어. 바리에이션은 `스껄ㅋㅋ`, `스껄ㅠㅠ`, `스껄????` 처럼 **간결하고 무의미하게** (감탄/체념/의문 등 톤만 바꿈). 긴 문장이나 의미 있는 한마디는 사용 금지. 매번 사용자 승인 받지 않아도 됨.
+- **클로드의 한마디**: 기본 `스껄.` 한 단어. 바리에이션은 `스껄ㅋㅋ`, `스껄ㅠㅠ`, `스껄????` 처럼 **간결하고 무의미하게** (감탄/체념/의문 등 톤만 바꿈). 긴 문장이나 의미 있는 한마디는 사용 금지. 문구 선택 후에도 최종 카드 전송 승인은 필수다.
 
 ### 사용 가능한 헤더 이미지
 
@@ -153,17 +183,17 @@ EOF
 2. **사용자 승인 요청** — "이 내용으로 Google Chat에 전송할까요?" 묻기.
    승인 전에는 절대 전송하지 않는다.
 
-3. **전송 실행** — 메시지를 가져온 스페이스로 전송:
+3. **전송 실행** — 메시지를 가져온 스페이스로 전송. 원 스레드에 답하려면 위와 같은 `--thread` 옵션을 추가한다:
    ```
    cat <<'MAILMAN_EOF' | bash ~/.claude/scripts/mailman/send.sh [스페이스별칭]
    [초안 내용]
    MAILMAN_EOF
    ```
 
-사용자가 명시적으로 요청한 경우에만 질문을 보낸다. 자의적으로 질문을 생성하지 않는다.
+질문도 사용자 명의 + `[🤖 Claude] ` 태그로 나간다. 태그와 스페이스/스레드를 초안에 표시하고, 전송 본문에는 태그를 중복해서 넣지 않는다. 사용자가 명시적으로 요청한 경우에만 질문을 보낸다. 자의적으로 질문을 생성하지 않는다.
 
 ## 공통 예외
 
 - `/mailman`과 무관한 다른 작업 중에는 위 전송 절차들을 적용하지 않는다.
 - 코드 수정 없이 분석만 한 경우 "변경 파일: 없음 (분석만 수행)"으로 명시.
-- "수집된 데이터가 없습니다" 메시지만 출력된 경우 아무 것도 하지 않는다.
+- 조회 결과가 "조회 조건에 맞는 수집된 메시지가 없습니다." 또는 "수집된 데이터가 없습니다. 먼저 run.sh auth 및 run.sh를 실행하세요."인 경우 아무 것도 하지 않는다. 앞의 스페이스 별칭이나 뒤의 메타 정보가 함께 출력되어도 같다.

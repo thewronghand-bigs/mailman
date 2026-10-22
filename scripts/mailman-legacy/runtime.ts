@@ -1,0 +1,89 @@
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+
+export type MailmanSpace = {
+  url: string;
+  webhookUrl?: string;
+  bots?: Record<string, string>;
+  defaultBot?: string;
+  /** @deprecated 더 이상 사용되지 않음. 사람 메시지는 @mailman 마커로, 봇은 모두 통과로 변경됨. */
+  mentionFilter?: string;
+  /** mailman 자신이 webhook 으로 발사한 카드를 다시 수집하지 않도록 자기 자신 봇 이름(들)을 명시. */
+  selfBotNames?: string[];
+};
+
+export type MailmanConfig = {
+  spaces?: Record<string, MailmanSpace>;
+  defaultSpace?: string;
+};
+
+const LEGACY_MAC_CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+
+export function getScriptDir(importMetaUrl: string): string {
+  return dirname(fileURLToPath(importMetaUrl));
+}
+
+export function loadConfig(scriptDir: string): MailmanConfig {
+  return JSON.parse(readFileSync(join(scriptDir, "config.json"), "utf8")) as MailmanConfig;
+}
+
+export function getMailmanHome(): string {
+  return process.env.MAILMAN_HOME || join(homedir(), ".claude");
+}
+
+export function getRuntimePaths(importMetaUrl: string) {
+  const scriptDir = getScriptDir(importMetaUrl);
+  const home = getMailmanHome();
+
+  return {
+    scriptDir,
+    home,
+    profileDir: join(home, "state", "mailman-chrome"),
+    dbPath: join(home, "inbox", "mailman.db"),
+    logFile: join(home, "logs", "mailman.log"),
+  };
+}
+
+export function ensureRuntimeDirs(paths: { profileDir: string; dbPath: string; logFile: string }) {
+  mkdirSync(paths.profileDir, { recursive: true });
+  mkdirSync(dirname(paths.dbPath), { recursive: true });
+  mkdirSync(dirname(paths.logFile), { recursive: true });
+}
+
+export function ensureDataDirs(paths: { dbPath: string; logFile: string }) {
+  mkdirSync(dirname(paths.dbPath), { recursive: true });
+  mkdirSync(dirname(paths.logFile), { recursive: true });
+}
+
+export function resolveSpace(config: MailmanConfig, requestedKey?: string) {
+  const spaces = config.spaces ?? {};
+  const defaultKey = config.defaultSpace ?? Object.keys(spaces)[0] ?? "";
+  const spaceKey = requestedKey && spaces[requestedKey] ? requestedKey : defaultKey;
+  const space = spaces[spaceKey];
+
+  if (!space) {
+    const available = Object.keys(spaces);
+    const hint = available.length > 0
+      ? `등록된 스페이스: [${available.join(", ")}]. defaultSpace가 이 중 하나와 일치하는지 확인하세요.`
+      : "spaces에 등록된 스페이스가 없습니다.";
+    throw new Error(
+      `[mailman] 스페이스를 찾을 수 없습니다: "${requestedKey || defaultKey || "(없음)"}". ${hint}`,
+    );
+  }
+
+  return { spaceKey, space };
+}
+
+export function resolveBotDisplayName(space: MailmanSpace): string {
+  const bots = space.bots ?? {};
+  const defaultBotAlias = space.defaultBot ?? Object.keys(bots)[0] ?? "";
+  return bots[defaultBotAlias] || "";
+}
+
+export function resolveChromePath(): string | undefined {
+  if (process.env.MAILMAN_CHROME_PATH) return process.env.MAILMAN_CHROME_PATH;
+  if (existsSync(LEGACY_MAC_CHROME_PATH)) return LEGACY_MAC_CHROME_PATH;
+  return undefined;
+}

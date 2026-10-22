@@ -1,6 +1,9 @@
 scripts/mailman/config.json
 scripts/mailman/node_modules/
 scripts/mailman/bun.lock
+scripts/mailman-legacy/config.json
+scripts/mailman-legacy/bun.lock
+.mailman-test-*/
 node_modules/
 package-lock.json
 .omc/

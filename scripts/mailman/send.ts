@@ -1,42 +1,13 @@
-import { readFileSync } from "node:fs";
-import { getScriptDir, loadConfig, resolveSpace } from "./runtime";
+import type { ChatClient, CreatedMessage } from "./chat";
+import { SEND_PREFIX } from "./content";
+import { MailmanError } from "./errors";
 
-const scriptDir = getScriptDir(import.meta.url);
-const config = loadConfig(scriptDir);
-
-const requestedSpaceKey = process.argv[2] ?? "";
-const { spaceKey, space } = resolveSpace(config, requestedSpaceKey);
-const webhookUrl = process.env.MAILMAN_WEBHOOK_URL || space.webhookUrl || "";
-
-if (!webhookUrl) {
-  console.error(
-    `[mailman-send] webhookUrl 이 설정되지 않았습니다. config.json 의 spaces.${spaceKey}.webhookUrl 확인.`,
-  );
-  process.exit(2);
+export function buildMessageBody(text: string, thread?: string): { text: string; thread?: { name: string } } {
+  if (!text.trim()) throw new MailmanError("빈 메시지는 전송하지 않습니다.");
+  return { text: SEND_PREFIX + text, ...(thread ? { thread: { name: thread } } : {}) };
 }
 
-const message = readFileSync(0, "utf8");
-if (!message.trim()) {
-  console.error("[mailman-send] 빈 메시지는 전송하지 않습니다.");
-  process.exit(1);
+export async function sendMessage(client: Pick<ChatClient, "createMessage">, space: string, text: string, thread?: string): Promise<CreatedMessage> {
+  // 네트워크 실패/응답 유실에서도 자동 재시도하지 않는다.
+  return client.createMessage(space, buildMessageBody(text, thread));
 }
-
-const response = await fetch(webhookUrl, {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json; charset=UTF-8",
-  },
-  body: JSON.stringify({ text: message }),
-});
-
-if (response.ok) {
-  console.log(`[mailman-send] ✅ 전송 완료 (space=${spaceKey})`);
-  process.exit(0);
-}
-
-const body = await response.text();
-console.error(`[mailman-send] ❌ 전송 실패 (HTTP ${response.status})`);
-if (body) {
-  console.error(body);
-}
-process.exit(3);
