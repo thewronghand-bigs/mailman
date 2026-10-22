@@ -13,10 +13,10 @@ scripts/mailman/
 ├─ errors.ts        # 종료 코드, 인증정보 비공개 처리
 ├─ store.ts         # bun:sqlite 스키마, 메시지 upsert, meta
 ├─ time.ts          # 나노초 보존 RFC3339 정규화
-├─ content.ts       # SEND_TAG, 기본 조회 필터, 마커 제거
+├─ content.ts       # 전송용 SEND_TAG, SEND_PREFIX
 ├─ cards.ts         # 카드 본문과 HTML 서식의 마크다운 렌더링
 ├─ collector.ts     # 스페이스 전체 메시지 증분/백필 수집
-├─ fetch.ts         # 조회 필터 → 스레드 선정 → 답글 전체 마크다운
+├─ fetch.ts         # seen 이후 조회 → 스레드/이전 맥락 출력 → seen 저장
 ├─ send.ts          # 태그/답글 전송 본문
 ├─ cli.ts           # 인증/수집/조회/전송 진입점
 ├─ lib.sh           # 세 래퍼의 공통 bun PATH 탐색
@@ -41,7 +41,7 @@ bun 전용. 외부 의존성 없이 `bun:sqlite`와 node 표준 모듈을 쓴다
 | `MAILMAN_HOME` | `~/.claude`, 데이터 루트 |
 | `MAILMAN_CLIENT_FILE` | `~/.claude/secrets/mailman-oauth.json`, Google `installed` JSON |
 | `MAILMAN_TOKEN_FILE` | `~/.claude/secrets/mailman-token.json`, refresh token/이메일/허용 스코프, 0600 |
-| `MAILMAN_DEEP` | `1`이면 meta와 무관하게 최근 30일 백필 |
+| `MAILMAN_DEEP` | `1`이면 수집 커서와 무관하게 최근 30일 백필 (조회 모드는 그대로) |
 | `MAILMAN_BACKFILL_DAYS` | 최초/DEEP 창 일수, 기본 7/30일, 1~36500 |
 
 - DB: `$MAILMAN_HOME/inbox/mailman-v2.db` (새 파일 0600)
@@ -55,8 +55,11 @@ bun 전용. 외부 의존성 없이 `bun:sqlite`와 node 표준 모듈을 쓴다
 - `config.json`은 gitignore 대상. 토큰, client secret, webhook URL을 출력하지 않는다.
 - access token은 메모리에서만 쓰며 매 실행마다 refresh한다. 토큰 없음은 exit 2, `invalid_grant`는 재인증 안내와 exit 3.
 - OAuth 스코프는 `auth.ts`의 다섯 개만 허용한다. 카드 전송은 기존 웹훅 curl 절차를 쓴다.
-- 수집은 조회 필터 없이 전부 저장한다. 기본 조회는 BOT + 첫 줄 `@mailman` HUMAN, `[🤖 Claude]` 시작 메시지는 제외한다. 선정된 스레드의 저장된 답글은 필터 없이 전부 출력한다.
+- config에 등록한 스페이스의 모든 메시지를 저장하고 조회에서도 모든 발신자를 포함한다. 무엇이 작업에 중요한지는 출력을 읽는 Claude가 판단한다.
+- `fetch.sh [스페이스]`는 mailman 자체의 스페이스별 seen 이후 메시지(첫 조회는 최근 24시간)를 오래된 것부터 최대 200건 출력한다. 스레드는 가장 이른 새 메시지순, 내부는 시간순이며 이전 맥락은 스레드당 최근 5건과 생략 건수를 표시한다.
+- 출력 성공 후 실제 표시한 새 메시지의 최대 `create_time`을 `seenCreateTime:<space>`에 저장한다. 동일 시각의 200건 경계를 잇기 위해 `seenMessageName:<space>`도 저장한다. 출력 실패/새 메시지 0건이면 seen을 바꾸지 않는다. Google Chat 읽음 상태와는 무관하다.
+- `fetch.sh [스페이스] --since 24h|3d|YYYY-MM-DD`는 지정 시점(날짜는 로컬 자정) 이후를 조회하며 seen을 바꾸지 않는다. 기간 단위는 양의 정수 `h`/`d`다. 상한 초과 시 기본 조회는 재실행으로 이어서 보고, 기간 조회는 `--since`를 좁힌다.
 - 일반 텍스트는 사용자 명의로 `[🤖 Claude] ` 태그를 붙여 전송한다. `--thread`로 원 스레드에 답글을 달 수 있다. 슬래시 커맨드의 전송 승인 절차를 유지한다.
-- 증분 기준은 마지막 `createTime`. 기존 메시지 수정분과 오래된 맥락은 DEEP 백필로 보완한다. 페이지 상한/실패에서는 DB/커서를 부분 갱신하지 않는다.
+- 수집 증분 기준은 마지막 `createTime`이며 조회 seen과 별개다. 기존 메시지 수정분과 오래된 맥락은 DEEP 백필로 보완한다. 수집 페이지 상한/실패에서는 메시지/수집 커서를 부분 갱신하지 않는다. DEEP 수집 후에도 기본 조회는 안 읽은 메시지다.
 - `any`를 쓰지 않는다. 외부 응답은 `unknown`에서 좁힌다.
 - 검증은 레포 루트에서 `bun test`. fetch를 주입하고 실제 Google 호출은 하지 않는다.

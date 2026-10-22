@@ -64,11 +64,14 @@ cp commands/mailman.md commands/mailman-deep.md ~/.claude/commands/
 레포 루트에서:
 
 ```bash
-bash scripts/mailman/fetch.sh tn 5
-MAILMAN_DEEP=1 bash scripts/mailman/fetch.sh tn 5
+bash scripts/mailman/fetch.sh tn
+bash scripts/mailman/fetch.sh tn --since 7d
+MAILMAN_DEEP=1 bash scripts/mailman/fetch.sh tn
 ```
 
-CLI의 조회 개수는 최신 스레드 수입니다. `/mailman tn 5`, `/mailman-deep tn 5`도 같은 래퍼를 씁니다.
+`/mailman [스페이스]`, `/mailman [스페이스] --since 7d`도 같은 래퍼를 씁니다. 기본 조회는 mailman이 마지막으로 보여준 이후의 새 메시지이며 첫 조회는 최근 24시간입니다. 모든 발신자를 포함하고, 새 메시지는 오래된 것부터 최대 200건과 스레드당 이전 맥락 최근 5건을 보여줍니다.
+
+출력 성공 뒤 seen 커서가 전진하고, 남은 새 메시지는 재실행으로 이어서 봅니다. `--since`는 양의 정수 `h`/`d` 기간 또는 `YYYY-MM-DD` 로컬 자정 이후를 조회하며 seen을 바꾸지 않습니다. 기간 조회가 상한을 넘으면 기간을 좁히세요. `/mailman-deep tn`은 백필 후에도 안 읽은 메시지 조회를 유지합니다. seen은 Google Chat의 읽음 상태와 무관합니다.
 
 ## 문제 해결
 
@@ -79,7 +82,8 @@ CLI의 조회 개수는 최신 스레드 수입니다. `/mailman tn 5`, `/mailma
 | 필수 스코프 누락 | 다시 인증하며 다섯 권한 모두 동의 |
 | HTTP 403 | 스페이스 멤버십, GCP의 Chat API 활성화, 조직 OAuth 정책 확인 |
 | 수정한 명세가 오래된 내용 | `MAILMAN_DEEP=1`로 백필; 필요하면 `MAILMAN_BACKFILL_DAYS` 확대 |
-| 기본 조회에 일반 대화가 없음 | `--all` 사용; 사람 명세 공유는 첫 줄 `@mailman` 마커 |
+| 이전에 본 메시지를 다시 조회하려 함 | `--since 7d` 또는 `--since YYYY-MM-DD`로 기간 지정; seen은 유지 |
+| 새 메시지가 200건을 넘음 | 기본 조회는 재실행으로 이어서 조회; 기간 조회는 `--since`를 좁힘 |
 | 수집 실패 뒤 과거 내용 출력 | 오류 안내와 출력 하단 마지막 성공 수집 시각 확인 |
 
 DB는 `~/.claude/inbox/mailman-v2.db`, 요약 로그는 `~/.claude/logs/mailman.log`에 있습니다. 스키마와 테스트는 [런타임 문서](scripts/mailman/README.md)를 참고하세요.

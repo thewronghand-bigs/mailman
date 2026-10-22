@@ -11,10 +11,10 @@ Google Chat 스페이스의 메시지를 로컬 SQLite에 모아 Claude Code에�
 ## 사용
 
 ```text
-/mailman                 # 기본 스페이스, 최근 5개 스레드
-/mailman 인준 3           # 인준 스페이스, 최근 3개 스레드
-/mailman tn 5 --all       # 사람의 일반 대화와 Claude 전송까지 조회
-/mailman-deep tn 5        # 최근 30일을 백필 재수집한 뒤 조회
+/mailman                 # 기본 스페이스, 마지막으로 보여준 이후의 새 메시지
+/mailman 인준             # 인준 스페이스의 새 메시지
+/mailman tn --since 7d    # 최근 7일 조회, seen 커서는 유지
+/mailman-deep tn          # 최근 30일을 백필 재수집한 뒤 새 메시지 조회
 ```
 
 CLI도 같은 동작을 합니다.
@@ -22,14 +22,15 @@ CLI도 같은 동작을 합니다.
 ```bash
 bash scripts/mailman/run.sh auth
 bash scripts/mailman/run.sh tn
-bash scripts/mailman/fetch.sh tn 5
-bash scripts/mailman/fetch.sh tn 5 --all
-MAILMAN_DEEP=1 bash scripts/mailman/fetch.sh tn 5
+bash scripts/mailman/fetch.sh tn
+bash scripts/mailman/fetch.sh tn --since 7d
+bash scripts/mailman/fetch.sh tn --since 2026-10-01
+MAILMAN_DEEP=1 bash scripts/mailman/fetch.sh tn
 printf '%s\n' '확인했습니다.' | bash scripts/mailman/send.sh tn
 printf '%s\n' '명세 반영 완료했습니다.' | bash scripts/mailman/send.sh tn --thread spaces/SPACE_ID/threads/THREAD_ID
 ```
 
-개수는 메시지 수가 아닌 **스레드 수(1~50)** 입니다. 봇별칭 인자는 없습니다.
+한 번에 새 메시지를 최대 **200건** 보여줍니다. 첫 조회는 최근 24시간이며, 기본 조회에서 남은 메시지는 다시 실행하면 이어서 보여줍니다.
 
 ## 설치와 설정
 
@@ -61,15 +62,19 @@ printf '%s\n' '명세 반영 완료했습니다.' | bash scripts/mailman/send.sh
                                                ↓
                                    모든 발신자 메시지를 SQLite upsert
                                                ↓
-                         조회 필터로 최신 스레드 선정 → 답글 전체 출력
+                         seen 이후 새 메시지 선정 → 스레드와 이전 맥락 출력
+                                               ↓
+                                  출력 성공 후 조회 seen 커서 저장
 ```
 
 - 최초 수집은 최근 7일입니다. 이후에는 스페이스별 마지막 `createTime` 이후를 증분 수집합니다.
-- `/mailman-deep`은 meta와 관계없이 최근 30일을 다시 받습니다. `MAILMAN_BACKFILL_DAYS`로 최초/백필 창을 바꿀 수 있습니다.
+- `/mailman-deep`은 수집 커서와 관계없이 최근 30일을 다시 받습니다. 구멍을 메우는 재수집이며, 그 뒤 조회는 기본 모드(안 읽은 메시지)를 유지합니다. `MAILMAN_BACKFILL_DAYS`로 최초/백필 창을 바꿀 수 있습니다.
 - 모든 발신자 메시지를 원문 그대로 저장합니다. 이름(`name`)이 같으면 `lastUpdateTime` 기준으로 수정 내용을 갱신합니다.
-- 기본 조회 대상은 **BOT 전부 + 첫 줄이 `@mailman`으로 시작하는 HUMAN**입니다. 마커는 대소문자를 구분하지 않으며 출력할 때 제거합니다.
-- `[🤖 Claude]`로 시작하는 메시지는 기본 조회에서 제외합니다. `--all`은 필터를 해제합니다.
-- 필터를 통과한 최신 메시지 순서로 스레드를 고른 뒤, 각 스레드의 **저장된 답글 전부**를 시간순으로 보여줍니다. 출력에는 `thread_name`, DB 기준 첫 메시지 `name`, 첨부 파일명이 포함됩니다.
+- 수집 범위는 **config에 등록한 방**으로 정합니다. 조회도 사람·봇·mailman 전송을 모두 포함하고 본문을 그대로 보여줍니다. Claude는 출력 전체를 읽고 API 스펙, 의현에게 온 요청·질문, 일정·배포 등 작업에 영향 주는 내용만 요약합니다.
+- 기본 조회는 **mailman이 그 방에서 마지막으로 보여준 이후**의 생성 시각을 가진 메시지입니다. 스페이스별 `seenCreateTime`은 수집 커서 및 Google Chat 읽음 상태와 별개입니다. seen이 없으면 최근 24시간을 보여줍니다.
+- 새 메시지를 오래된 것부터 최대 200건 고릅니다. 스레드는 가장 이른 새 메시지 시각순이며 내부는 시간순입니다. 오래된 스레드의 답글이면 직전의 저장된 메시지 중 최근 5건을 **이전 맥락**으로 붙이고, 생략한 건수를 표시합니다. 출력에는 `thread_name`, DB 기준 첫 메시지 `name`, 각 메시지의 발신자·BOT/HUMAN 구분, 첨부 파일명이 포함됩니다.
+- 출력 완료 후 실제 표시한 새 메시지의 최대 생성 시각까지 seen을 전진합니다. 같은 시각에 200건 경계가 걸리면 메시지 이름을 보조 커서로 사용해 이어서 보여줍니다. 출력 실패 또는 새 메시지 0건이면 seen은 그대로입니다. 빈 결과는 `[별칭] 새 메시지가 없습니다.`로 표시합니다.
+- `--since 24h`, `--since 3d`, `--since 7d` 또는 `--since YYYY-MM-DD`는 지정 시점 이후를 조회합니다. 기간은 양의 정수 시간/일, 날짜는 실행 환경의 로컬 자정 기준이며 **seen을 바꾸지 않습니다**. 같은 200건·스레드 규칙을 적용하고, 상한을 넘으면 기간을 좁히도록 안내합니다.
 - `cardsV2`와 구형 `cards`의 카드 본문도 제목·섹션·코드블록·버튼 링크 등을 마크다운 텍스트로 펼칩니다. 메시지 텍스트가 함께 있으면 텍스트 다음에 카드를 표시합니다.
 - 수집에 실패해도 `fetch.sh`는 기존 DB를 보여줍니다. 오류 안내와 마지막 성공 수집 시각을 함께 확인하세요.
 
