@@ -5,10 +5,11 @@ import { join } from "node:path";
 import { main, parseArguments } from "../cli";
 import { SEND_PREFIX } from "../content";
 import { getRuntimePaths, loadConfig, resolveSpace } from "../runtime";
-import { openDatabase, toRow, upsertRows } from "../store";
+import { getMeta, openDatabase, setMeta, toRow, upsertRows } from "../store";
 import { cleanupFixtures, fixture, json, message, mockFetch, SPACE, THREAD } from "./helpers";
 
 afterEach(cleanupFixtures);
+const NOW = new Date("2026-10-22T12:00:00Z");
 
 describe("CLI와 경로", () => {
   test("데이터 경로와 인증정보 경로를 각각 덮어쓴다", () => {
@@ -24,22 +25,26 @@ describe("CLI와 경로", () => {
     const config = loadConfig(fixture().scriptDir);
     expect(resolveSpace(config).space.space).toBe(SPACE);
     expect(() => resolveSpace(config, "없는별칭")).toThrow("등록되지 않은");
-    expect(parseArguments("fetch", ["tn", "3", "--all"])).toMatchObject({ spaceKey: "tn", limit: 3, all: true });
-    expect(parseArguments("fetch", ["3"]).spaceKey).toBeUndefined();
-    expect(parseArguments("fetch", ["3"]).limit).toBe(3);
-    expect(() => parseArguments("fetch", ["tn", "봇별칭", "3"])).toThrow();
-    expect(() => parseArguments("fetch", ["0"])).toThrow();
+    expect(parseArguments("fetch", []).spaceKey).toBeUndefined();
+    expect(parseArguments("fetch", ["tn", "--since", "7d"], NOW)).toMatchObject({ spaceKey: "tn", since: "2026-10-15T12:00:00.000000000Z" });
+    expect(parseArguments("fetch", ["--since", "24h", "tn"], NOW)).toMatchObject({ spaceKey: "tn", since: "2026-10-21T12:00:00.000000000Z" });
+    expect(parseArguments("fetch", ["--since", "2026-10-01"], NOW).since).toBeDefined();
+    for (const args of [["tn", "3"], ["--all"], ["tn", "봇별칭"], ["--since"], ["--since", "--helpful"], ["--since", "0d"], ["--since", "7d", "--since", "3d"]]) {
+      expect(() => parseArguments("fetch", args, NOW)).toThrow();
+    }
+    expect(() => parseArguments("run", ["--since", "7d"])).toThrow();
+    expect(() => parseArguments("send", ["--since", "7d"])).toThrow();
   });
 
   test("토큰 없음은 run exit 2이고 fetch는 기존 DB를 계속 보여준다", async () => {
     const paths = fixture(false);
     const db = openDatabase(paths.dbPath);
-    upsertRows(db, [toRow(message("cached", undefined, { text: "기존 DB 본문" }), SPACE, new Date().toISOString())]);
+    upsertRows(db, [toRow(message("cached", "2026-10-22T11:00:00Z", { text: "기존 DB 본문" }), SPACE, NOW.toISOString())]);
     db.close();
     const output: string[] = [];
     const errors: string[] = [];
     const { fetcher, calls } = mockFetch(() => { throw new Error("호출하면 안 됨"); });
-    const dependencies = { paths, fetcher, stdout: (text: string) => output.push(text), stderr: (text: string) => errors.push(text) };
+    const dependencies = { paths, fetcher, now: NOW, stdout: (text: string) => output.push(text), stderr: (text: string) => errors.push(text) };
     expect(await main(["run", "tn"], dependencies)).toBe(2);
     expect(await main(["fetch", "tn"], dependencies)).toBe(0);
     expect(output.join("\n")).toContain("기존 DB 본문");
@@ -48,6 +53,54 @@ describe("CLI와 경로", () => {
     const log = readFileSync(paths.logFile, "utf8").trim().split("\n");
     expect(log).toHaveLength(2);
     for (const line of log) expect(line).toContain(`space=${SPACE} 수집 실패: 토큰 파일이 없습니다.`);
+  });
+
+  test("fetch는 기간 조회/출력 실패 때 seen을 유지하고 기본 조회 성공 뒤에만 저장한다", async () => {
+    const paths = fixture(false);
+    const seenKey = `seenCreateTime:${SPACE}`;
+    const initialSeen = "2026-10-20T00:00:00.000000000Z";
+    const db = openDatabase(paths.dbPath);
+    try {
+      setMeta(db, seenKey, initialSeen);
+      upsertRows(db, [toRow(message("new", "2026-10-22T11:00:00Z", { text: "안 읽은 본문" }), SPACE, NOW.toISOString())]);
+    } finally { db.close(); }
+    const readSeen = () => {
+      const stored = openDatabase(paths.dbPath);
+      try { return getMeta(stored, seenKey); } finally { stored.close(); }
+    };
+    const output: string[] = [];
+    const { fetcher, calls } = mockFetch(() => { throw new Error("호출하면 안 됨"); });
+    const dependencies = { paths, fetcher, now: NOW, stderr: () => {}, stdout: (text: string) => output.push(text) };
+    expect(await main(["fetch", "tn", "--since", "7d"], dependencies)).toBe(0);
+    expect(output.at(-1)).toContain("안 읽은 본문");
+    expect(readSeen()).toBe(initialSeen);
+    expect(await main(["fetch", "tn"], { ...dependencies, stdout: async () => { throw new Error("출력 실패"); } })).toBe(1);
+    expect(readSeen()).toBe(initialSeen);
+    expect(await main(["fetch", "tn"], dependencies)).toBe(0);
+    expect(readSeen()).toBe("2026-10-22T11:00:00.000000000Z");
+    expect(await main(["fetch", "tn"], dependencies)).toBe(0);
+    expect(output.at(-1)).toStartWith("[tn] 새 메시지가 없습니다.");
+    expect(readSeen()).toBe("2026-10-22T11:00:00.000000000Z");
+    expect(calls).toHaveLength(0);
+  });
+
+  test("실제 stdout 파이프가 닫혀도 seen을 저장하지 않는다", async () => {
+    const paths = fixture(false);
+    const db = openDatabase(paths.dbPath);
+    try {
+      upsertRows(db, [toRow(message("new", "2026-10-22T11:00:00Z"), SPACE, NOW.toISOString())]);
+    } finally { db.close(); }
+    const script = `import { main } from ${JSON.stringify(new URL("../cli.ts", import.meta.url).href)};
+      process.exitCode = await main(["fetch"], { paths: ${JSON.stringify(paths)}, now: new Date(${JSON.stringify(NOW.toISOString())}),
+        fetcher: async () => { throw new Error("실제 네트워크 호출 금지"); } });`;
+    const child = Bun.spawnSync(["/bin/bash", "-c", 'set -o pipefail\n"$1" --eval "$2" | /usr/bin/true', "mailman-stdout-test", process.execPath, script]);
+    expect(child.exitCode).toBe(1);
+    expect(child.stderr.toString()).toContain("처리 중 오류가 발생했습니다.");
+    const stored = openDatabase(paths.dbPath);
+    try {
+      expect(getMeta(stored, `seenCreateTime:${SPACE}`)).toBeUndefined();
+      expect(getMeta(stored, `seenMessageName:${SPACE}`)).toBeUndefined();
+    } finally { stored.close(); }
   });
 
   test("invalid_grant 안내와 Google 오류를 처리하고 비밀값을 출력하지 않는다", async () => {
@@ -159,7 +212,8 @@ describe("CLI와 경로", () => {
     const scriptDir = join(import.meta.dir, "..");
     const cases: Array<[string, string[], number]> = [
       ["run", ["--help"], 0], ["fetch", ["--help"], 0], ["send", ["--help"], 0],
-      ["run", ["auth", "extra"], 1], ["fetch", ["tn", "봇별칭", "3"], 1], ["send", ["--thread"], 1],
+      ["run", ["auth", "extra"], 1], ["fetch", ["tn", "3"], 1], ["fetch", ["--all"], 1],
+      ["fetch", ["--since"], 1], ["fetch", ["--since", "2026-02-30"], 1], ["send", ["--thread"], 1],
     ];
     for (const [wrapper, args, status] of cases) {
       const result = Bun.spawnSync(["bash", join(scriptDir, `${wrapper}.sh`), ...args], {

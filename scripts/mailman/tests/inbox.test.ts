@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { ChatClient, type ChatMessage } from "../chat";
 import { collectMessages } from "../collector";
-import { SEND_PREFIX, displayText, matchesDefaultFilter } from "../content";
-import { queryThreads, renderInbox } from "../fetch";
+import { SEND_PREFIX } from "../content";
+import { renderInbox, queryInbox } from "../fetch";
 import { collectionOptions } from "../runtime";
 import { getMeta, openDatabase, setMeta, toRow, upsertRows, type MessageRow } from "../store";
 import { normalizeTime } from "../time";
-import { json, message, mockFetch, SPACE, THREAD } from "./helpers";
+import { json, message, mockFetch, SPACE } from "./helpers";
 import apiCard from "./fixtures/api-card.json";
 
 const NOW = new Date("2026-10-22T12:00:00Z");
@@ -127,50 +127,7 @@ describe("수집과 증분 저장", () => {
   });
 });
 
-describe("조회 필터와 스레드", () => {
-  test("봇 전체, 사람 첫 줄 마커만 통과하고 자기 전송은 제외한다", () => {
-    const cases: Array<[string | null, string, boolean]> = [
-      ["BOT", "명세", true], ["BOT", "", true], ["HUMAN", "@MaIlMaN: 명세\n내용", true],
-      ["HUMAN", "일반 대화", false], ["HUMAN", "대화\n@mailman", false], ["HUMAN", "\n@mailman", false],
-      ["HUMAN", "@mailmaniac", false], [null, "@mailman 명세", false],
-      ["BOT", `${SEND_PREFIX}봇 명의라도 제외`, false], ["HUMAN", `${SEND_PREFIX}답장`, false],
-    ];
-    for (const [type, text, expected] of cases) expect(matchesDefaultFilter(type, text)).toBe(expected);
-    expect(displayText("HUMAN", "@MaIlMaN: 명세\n본문")).toBe("명세\n본문");
-    expect(displayText("BOT", "@mailman 봇 본문")).toBe("@mailman 봇 본문");
-  });
-
-  test("최신 통과 메시지로 N개 스레드를 고르고 무표식 답글/자기 전송까지 시간순으로 포함한다", () => {
-    const db = openDatabase(":memory:");
-    const thread2 = `${SPACE}/threads/thread-2`;
-    try {
-      const items = [
-        message("root", "2026-10-01T00:00:00Z", { sender: { type: "HUMAN" }, text: "먼저 나눈 대화" }),
-        message("bot", "2026-10-02T00:00:00Z"),
-        message("marked", "2026-10-03T00:00:00Z", { sender: { type: "HUMAN" }, text: "@MAILMAN: 명세", thread: { name: thread2 } }),
-        message("reply2", "2026-10-04T00:00:00Z", { sender: { type: "HUMAN" }, text: "자연스러운 답글", thread: { name: thread2 } }),
-        message("reply1", "2026-10-09T00:00:00Z", { sender: { type: "HUMAN" }, text: "최신 일반 답글" }),
-        message("own", "2026-10-10T00:00:00Z", { sender: { type: "HUMAN" }, text: `${SEND_PREFIX}응답` }),
-        message("plain-only", "2026-10-11T00:00:00Z", { sender: { type: "HUMAN" }, thread: { name: `${SPACE}/threads/plain` } }),
-        message("self-only", "2026-10-12T00:00:00Z", { sender: { type: "HUMAN" }, text: `${SEND_PREFIX}독립`, thread: { name: `${SPACE}/threads/self` } }),
-      ];
-      upsertRows(db, items.map(item => toRow(item, SPACE, NOW.toISOString())));
-      const options = { spaceKey: "tn", space: SPACE, limit: 2, all: false };
-      const selected = queryThreads(db, options);
-      expect(selected.map(thread => thread.name)).toEqual([thread2, THREAD]);
-      expect(selected[0]!.messages.map(row => row.text)).toEqual(["@MAILMAN: 명세", "자연스러운 답글"]);
-      expect(selected[1]!.messages.map(row => row.name)).toEqual(["root", "bot", "reply1", "own"].map(id => `${SPACE}/messages/${id}`));
-      expect(queryThreads(db, { ...options, limit: 1 })).toHaveLength(1);
-      expect(queryThreads(db, { ...options, all: true }).map(thread => thread.name)).toEqual([`${SPACE}/threads/self`, `${SPACE}/threads/plain`]);
-      const markdown = renderInbox(db, options);
-      expect(markdown).toContain(`thread_name: \`${thread2}\``);
-      expect(markdown).toContain(`첫 메시지 name (DB 기준): \`${SPACE}/messages/marked\``);
-      expect(markdown).not.toContain("@MAILMAN:");
-      expect(markdown).toContain("자연스러운 답글");
-      expect(markdown).toContain(`${SEND_PREFIX}응답`);
-    } finally { db.close(); }
-  });
-
+describe("메시지 렌더링", () => {
   test("스페이스를 격리하고 thread 없는 메시지/첨부만 있는 메시지도 출력한다", () => {
     const db = openDatabase(":memory:");
     try {
@@ -181,10 +138,10 @@ describe("조회 필터와 스레드", () => {
         { name: `${SPACE}/messages/attachment/attachments/image`, contentName: " ", contentType: "image/png" },
         { name: resourceName, contentName: "", contentType: "" },
       ] }), SPACE, NOW.toISOString())]);
-      const options = { spaceKey: "tn", space: SPACE, limit: 5, all: false };
-      expect(queryThreads(db, options)[0]?.name).toBeNull();
+      const options = { spaceKey: "tn", space: SPACE, now: new Date("2026-10-21T12:00:00Z") };
+      expect(queryInbox(db, options).threads[0]?.name).toBeNull();
       expect(renderInbox(db, options)).toContain(`(첨부: 명세.pdf, sample.json, image/png, ${resourceName})`);
-      expect(queryThreads(db, { ...options, space: "spaces/other" })).toHaveLength(0);
+      expect(queryInbox(db, { ...options, space: "spaces/other" }).threads).toHaveLength(0);
     } finally { db.close(); }
   });
 
@@ -204,7 +161,7 @@ describe("조회 필터와 스레드", () => {
       const db = openDatabase(":memory:");
       try {
         upsertRows(db, [toRow(message("card", undefined, { text: "", ...extra }), SPACE, NOW.toISOString())]);
-        const markdown = renderInbox(db, { spaceKey: "tn", space: SPACE, limit: 5, all: false });
+        const markdown = renderInbox(db, { spaceKey: "tn", space: SPACE, since: "2026-10-20T00:00:00Z" });
         expect(markdown).toContain(expected);
         expect(markdown).not.toContain("(본문 없음)");
       } finally { db.close(); }
@@ -215,33 +172,32 @@ describe("조회 필터와 스레드", () => {
     const db = openDatabase(":memory:");
     try {
       const items = [
-        message("named", undefined, { text: "@mailman 본문", sender: { type: "HUMAN", name: "users/named", displayName: "테스터" }, cardsV2: [{ card: { header: { title: "카드 제목" } } }] }),
+        message("named", undefined, { text: "본문", sender: { type: "HUMAN", name: "users/named", displayName: "테스터" }, cardsV2: [{ card: { header: { title: "카드 제목" } } }] }),
         message("unnamed", "2026-10-21T00:00:01Z", { text: "답글", sender: { type: "HUMAN", name: "users/unnamed", displayName: "" } }),
       ];
       upsertRows(db, items.map(item => toRow(item, SPACE, NOW.toISOString())));
-      const markdown = renderInbox(db, { spaceKey: "tn", space: SPACE, limit: 5, all: false });
-      expect(markdown).toContain("— 테스터");
+      const markdown = renderInbox(db, { spaceKey: "tn", space: SPACE, since: "2026-10-20T00:00:00Z" });
+      expect(markdown).toContain("— 테스터 (HUMAN)");
       expect(markdown).toContain("— users/unnamed (HUMAN)");
       expect(markdown).toContain("본문\n\n**카드 제목**");
       expect(markdown).not.toContain("(카드");
     } finally { db.close(); }
   });
 
-  test("멘션과 분리된 HUMAN 카드 답글도 필터와 관계없이 스레드 전체에 표시한다", () => {
+  test("텍스트와 분리된 HUMAN 카드 답글도 같은 스레드에 표시한다", () => {
     const db = openDatabase(":memory:");
     try {
       upsertRows(db, [
-        message("mention", undefined, { sender: { type: "HUMAN" }, text: "@mailman API 변경 공유" }),
+        message("mention", undefined, { sender: { type: "HUMAN" }, text: "API 변경 공유" }),
         message("card-reply", "2026-10-21T00:00:01Z", { sender: { type: "HUMAN" }, text: "", cardsV2: [{ card: apiCard }] }),
       ].map(item => toRow(item, SPACE, NOW.toISOString())));
-      const options = { spaceKey: "tn", space: SPACE, limit: 1, all: false };
-      expect(queryThreads(db, options)[0]?.messages).toHaveLength(2);
+      const options = { spaceKey: "tn", space: SPACE, since: "2026-10-20T00:00:00Z" };
+      expect(queryInbox(db, options).threads[0]?.messages).toHaveLength(2);
       const markdown = renderInbox(db, options);
       expect(markdown).toContain("API 변경 공유");
       expect(markdown).toContain("**권한 메뉴 조회 API 명칭 변경**");
       expect(markdown).toContain("```\nGET /menus\n\nAuthorization: Bearer STRING\n```");
       expect(markdown).toContain('  "message": STRING,');
-      expect(markdown).not.toContain("@mailman");
     } finally { db.close(); }
   });
 });
