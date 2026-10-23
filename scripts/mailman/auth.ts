@@ -9,13 +9,16 @@ import { requestJson, type Fetch } from "./http";
 import type { RuntimePaths } from "./runtime";
 import { writePrivateFile } from "./private-file";
 
-export const SCOPES = [
+export const REQUIRED_SCOPES = [
   "openid",
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/chat.spaces.readonly",
   "https://www.googleapis.com/auth/chat.messages.readonly",
   "https://www.googleapis.com/auth/chat.messages.create",
 ] as const;
+export const REACTION_SCOPE = "https://www.googleapis.com/auth/chat.messages.reactions.create";
+// 기존 토큰도 조회·전송에 쓸 수 있다. 리액션 권한은 react에서만 요구한다.
+export const SCOPES = [...REQUIRED_SCOPES, REACTION_SCOPE] as const;
 
 export type OAuthClient = { client_id: string; client_secret: string; auth_uri: string; token_uri: string };
 export type SavedToken = { refresh_token: string; email: string; scopes: string[]; user_name?: string };
@@ -65,7 +68,7 @@ export function parseOAuthCallback(url: URL, expectedState: string): string {
 function checkScopes(scopes: string[]): string[] {
   // Google이 email 별칭을 반환하는 경우에도 같은 권한으로 취급한다.
   const granted = [...new Set(scopes.map(scope => scope === "email" ? SCOPES[1] : scope))];
-  const missing = SCOPES.filter(scope => !granted.includes(scope));
+  const missing = REQUIRED_SCOPES.filter(scope => !granted.includes(scope));
   if (missing.length > 0) {
     throw new MailmanError(`필수 스코프가 빠졌습니다: ${missing.join(", ")}. 다시 mailman auth를 실행하세요.`, 3);
   }
@@ -73,6 +76,12 @@ function checkScopes(scopes: string[]): string[] {
     throw new MailmanError("허용 목록 밖의 OAuth 스코프가 있습니다. 이 클라이언트의 기존 동의를 취소한 뒤 다시 mailman auth를 실행하세요.", 3);
   }
   return granted;
+}
+
+export function requireReactionScope(tokenFile: string): void {
+  if (!loadToken(tokenFile).scopes.includes(REACTION_SCOPE)) {
+    throw new MailmanError(`리액션 권한이 없습니다 (${REACTION_SCOPE}). mailman auth를 다시 실행하세요.`, 2);
+  }
 }
 
 function scopesFromResponse(body: Record<string, unknown>): string[] {

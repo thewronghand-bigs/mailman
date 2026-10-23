@@ -8,7 +8,7 @@ import { CLIENT, cleanupFixtures, fixture, json, mockFetch } from "./helpers";
 afterEach(cleanupFixtures);
 
 describe("OAuth URL과 콜백", () => {
-  test("PKCE S256/state/offline/consent와 정확히 다섯 스코프만 요청한다", () => {
+  test("PKCE S256/state/offline/consent와 기존 5개+리액션 스코프만 요청한다", () => {
     const pkce = createPkce();
     expect(pkce.verifier).toMatch(/^[A-Za-z0-9_-]{43,128}$/);
     expect(pkce.challenge).toBe(createHash("sha256").update(pkce.verifier).digest("base64url"));

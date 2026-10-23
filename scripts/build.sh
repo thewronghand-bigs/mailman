@@ -1,7 +1,7 @@
 #!/bin/bash
 # mailman 단일 실행 파일 빌드: dist/mailman-darwin-arm64, dist/mailman-darwin-x64
 # 사용: bash scripts/build.sh            (버전은 scripts/mailman/package.json)
-#       MAILMAN_VERSION=2.1.0 bash scripts/build.sh   (릴리스 태그 등으로 덮어쓰기)
+#       MAILMAN_VERSION=2.2.0 bash scripts/build.sh   (릴리스 태그 등으로 덮어쓰기)
 set -euo pipefail
 
 ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

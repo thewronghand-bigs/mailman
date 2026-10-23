@@ -116,7 +116,7 @@ describe("CLI와 경로", () => {
     const paths = fixture();
     const { fetcher, calls } = mockFetch(() => json({ error: "invalid_grant", error_description: "fixture-refresh-secret fixture-client-secret" }, 400));
     const errors: string[] = [];
-    expect(await main(["collect"], { paths, fetcher, stderr: text => errors.push(text) })).toBe(3);
+    expect(await main(["collect"], { paths, fetcher, stdout: () => {}, stderr: text => errors.push(text) })).toBe(3);
     expect(errors.join("\n")).toContain("다시 mailman auth");
     expect(errors.join("\n")).not.toContain("fixture-refresh-secret");
     expect(errors.join("\n")).not.toContain("fixture-client-secret");
@@ -134,7 +134,7 @@ describe("CLI와 경로", () => {
     const paths = fixture();
     const { fetcher } = mockFetch((_url, _init, index) => index === 0
       ? json({ access_token: "fixture-access-secret" }) : json({ messages: [message("one")] }));
-    expect(await main(["collect"], { paths, fetcher, stderr: () => {} })).toBe(0);
+    expect(await main(["collect"], { paths, fetcher, stdout: () => {}, stderr: () => {} })).toBe(0);
     const log = readFileSync(paths.logFile, "utf8");
     expect(log.trim().split("\n")).toHaveLength(1);
     expect(log).toContain(`space=${SPACE} received=1 saved=1`);
@@ -170,7 +170,7 @@ describe("CLI와 경로", () => {
     const paths = fixture(false);
     mkdirSync(paths.logFile, { recursive: true });
     const errors: string[] = [];
-    expect(await main(["collect"], { paths, stderr: text => errors.push(text) })).toBe(2);
+    expect(await main(["collect"], { paths, stdout: () => {}, stderr: text => errors.push(text) })).toBe(2);
     expect(errors.join("\n")).toContain("수집 실패 로그를 기록할 수 없습니다.");
     expect(errors.join("\n")).toContain("토큰 파일이 없습니다.");
   });
@@ -217,6 +217,19 @@ describe("CLI와 경로", () => {
     expect(calls).toHaveLength(0);
   });
 
+  test("일반 send는 대기용 createTime/sender 형식이 이상해도 전송 성공이면 exit 0이다", async () => {
+    const paths = fixture();
+    for (const metadata of [{ createTime: "invalid" }, { createTime: 42 }, { sender: { name: 42 } }, { sender: "invalid" }]) {
+      const output: string[] = [], errors: string[] = [];
+      const api = mockFetch(url => url.hostname === "oauth2.googleapis.com" ? json({ access_token: "fixture-access" })
+        : json({ name: `${SPACE}/messages/sent`, thread: { name: THREAD }, ...metadata }));
+      expect(await main(["send"], { paths, env: {}, fetcher: api.fetcher, stdin: () => "본문", stdout: text => output.push(text), stderr: text => errors.push(text) })).toBe(0);
+      expect(output.join("\n")).toContain("✅ 전송 완료");
+      expect(errors).toHaveLength(0);
+      expect(api.calls).toHaveLength(2);
+    }
+  });
+
   test("mailman-dev의 help/버전/인자 오류는 설정을 읽거나 런타임 파일을 만들지 않는다", () => {
     const paths = fixture(false);
     const devRunner = join(import.meta.dir, "..", "mailman-dev");
@@ -239,7 +252,7 @@ describe("CLI와 경로", () => {
     }
     expect(existsSync(paths.dbPath)).toBe(false);
     expect(existsSync(paths.logFile)).toBe(false);
-  });
+  }, 15_000); // 수십 개 자식 프로세스를 실행하므로 OS 부하에 여유를 둔다.
 });
 
 describe("전송 태그", () => {

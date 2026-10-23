@@ -1,9 +1,18 @@
 import { isRecord, MailmanError, RequestError, registerSecret } from "./errors";
-import { chatError, requestJson, type Fetch } from "./http";
-import { validateSpace, validateThread } from "./runtime";
+import { chatError, requestBytes, requestJson, requestUploadJson, type Fetch, type TimeoutScheduler } from "./http";
+import { parseMessageName, validateSpace, validateThread } from "./runtime";
+import { parseEmoji, type ReactionEmoji } from "./react";
 import { normalizeTime } from "./time";
+import { multipartUpload, type UploadFile } from "./upload";
 
-export type ChatAttachment = Record<string, unknown> & { contentName?: string; contentType?: string; name?: string };
+export type AttachmentDataRef = { resourceName?: string; attachmentUploadToken?: string };
+export type UploadedAttachment = { attachmentDataRef: AttachmentDataRef };
+export type MessageBody = { text?: string; thread?: { name: string }; attachment?: UploadedAttachment[] };
+export type ChatAttachment = Record<string, unknown> & {
+  contentName?: string; contentType?: string; name?: string;
+  attachmentDataRef?: AttachmentDataRef;
+  driveDataRef?: { driveFileId?: string };
+};
 export type ChatMessage = Record<string, unknown> & {
   name: string;
   createTime: string;
@@ -45,7 +54,8 @@ export function parseMessage(value: unknown, space: string): ChatMessage {
       !optionalFields(value.sender, ["name", "displayName", "type"]) ||
       !optionalFields(value.thread, ["name"]) ||
       (value.attachment !== undefined && (!Array.isArray(value.attachment) ||
-        !value.attachment.every(item => isRecord(item) && optionalFields(item, ["contentName", "contentType", "name"]))))) {
+        !value.attachment.every(item => isRecord(item) && optionalFields(item, ["contentName", "contentType", "name"]) &&
+          optionalFields(item.attachmentDataRef, ["resourceName"]) && optionalFields(item.driveDataRef, ["driveFileId"]))))) {
     throw new MailmanError("Google Chat 메시지 응답 형식이 올바르지 않습니다.", 3);
   }
   normalizeTime(value.createTime);
@@ -55,20 +65,21 @@ export function parseMessage(value: unknown, space: string): ChatMessage {
 
 export class ChatClient {
   constructor(private accessToken: string, private readonly fetcher: Fetch = fetch, private readonly signal?: AbortSignal,
-    private readonly refreshAccessToken?: (signal?: AbortSignal) => Promise<string>) {
+    private readonly refreshAccessToken?: (signal?: AbortSignal) => Promise<string>, private readonly timeoutScheduler?: TimeoutScheduler) {
     registerSecret(accessToken);
   }
 
-  private async request(url: URL, init: RequestInit): Promise<unknown> {
+  private async authorized<T>(init: RequestInit, request: (init: RequestInit) => Promise<T>): Promise<T> {
     const signal = this.signal && init.signal ? AbortSignal.any([this.signal, init.signal]) : this.signal ?? init.signal ?? undefined;
     for (let refreshed = false;;) {
       try {
-        const { response, body } = await requestJson(this.fetcher, url, {
+        const headers = new Headers(init.headers);
+        if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json; charset=UTF-8");
+        headers.set("Authorization", `Bearer ${this.accessToken}`);
+        return await request({
           ...init, signal,
-          headers: { "Content-Type": "application/json; charset=UTF-8", Authorization: `Bearer ${this.accessToken}` },
+          headers,
         });
-        if (!response.ok) throw chatError(response.status, body);
-        return body;
       } catch (error: unknown) {
         // 읽기만 재시도한다. 전송 요청은 응답 유실 가능성 때문에 재시도하지 않는다.
         if (init.method !== "GET" || refreshed || !this.refreshAccessToken || !(error instanceof RequestError) || error.status !== 401) throw error;
@@ -76,6 +87,74 @@ export class ChatClient {
         this.accessToken = await this.refreshAccessToken(signal);
         registerSecret(this.accessToken);
       }
+    }
+  }
+
+  private async request(url: URL, init: RequestInit): Promise<unknown> {
+    return this.authorized(init, async authorized => {
+      const { response, body } = await requestJson(this.fetcher, url, authorized);
+      if (!response.ok) throw chatError(response.status, body);
+      return body;
+    });
+  }
+
+  async getMessage(name: string): Promise<ChatMessage> {
+    const { space } = parseMessageName(name);
+    const message = parseMessage(await this.request(new URL(`https://chat.googleapis.com/v1/${name}`), { method: "GET" }), space);
+    if (message.name !== name) throw new MailmanError("Google Chat 메시지 응답의 name이 요청과 다릅니다.", 3);
+    return message;
+  }
+
+  async downloadMedia(resourceName: string, maxBytes: number): Promise<Buffer> {
+    const parts = resourceName.split("/");
+    if (parts.some(part => !part || part === "." || part === ".." || /[\p{Cc}\p{Cf}]/u.test(part))) {
+      throw new MailmanError("첨부 다운로드 참조 형식이 올바르지 않습니다.", 3);
+    }
+    const url = new URL(`https://chat.googleapis.com/v1/media/${parts.map(encodeURIComponent).join("/")}`);
+    url.searchParams.set("alt", "media");
+    return this.authorized({ method: "GET" }, init => requestBytes(this.fetcher, url, init, maxBytes, this.timeoutScheduler));
+  }
+
+  async uploadAttachment(space: string, file: UploadFile): Promise<UploadedAttachment> {
+    validateSpace(space);
+    const upload = multipartUpload(file);
+    const url = new URL(`https://chat.googleapis.com/upload/v1/${space}/attachments:upload`);
+    url.searchParams.set("uploadType", "multipart");
+    try {
+      const result = await this.authorized({ method: "POST", ...upload }, async init => {
+        const { response, body } = await requestUploadJson(this.fetcher, url, { ...init, body: upload.body }, this.timeoutScheduler);
+        if (!response.ok) throw chatError(response.status, body);
+        return body;
+      });
+      if (!isRecord(result) || !isRecord(result.attachmentDataRef) ||
+          !optionalFields(result.attachmentDataRef, ["resourceName", "attachmentUploadToken"]) ||
+          !(result.attachmentDataRef.resourceName || result.attachmentDataRef.attachmentUploadToken)) {
+        throw new MailmanError("첨부 업로드 응답의 attachmentDataRef를 확인할 수 없습니다.", 3);
+      }
+      const ref = result.attachmentDataRef;
+      if (typeof ref.attachmentUploadToken === "string") registerSecret(ref.attachmentUploadToken);
+      return { attachmentDataRef: {
+        ...(typeof ref.resourceName === "string" ? { resourceName: ref.resourceName } : {}),
+        ...(typeof ref.attachmentUploadToken === "string" ? { attachmentUploadToken: ref.attachmentUploadToken } : {}),
+      } };
+    } catch (error: unknown) {
+      if (error instanceof RequestError && error.status === 403) {
+        throw new RequestError("HTTP 403: 첨부 업로드 권한 부족 — 기존 chat.messages.create 권한을 확인하고 mailman auth를 다시 실행하세요. 추가 스코프는 요청하지 않습니다.", 403);
+      }
+      throw error;
+    } finally { await upload.body.cancel().catch(() => {}); }
+  }
+
+  // 409/ALREADY_EXISTS는 같은 사용자의 같은 리액션이 이미 있으므로 성공이다.
+  async createReaction(name: string, emoji: ReactionEmoji): Promise<boolean> {
+    parseMessageName(name);
+    parseEmoji(emoji);
+    try {
+      await this.request(new URL(`https://chat.googleapis.com/v1/${name}/reactions`), { method: "POST", body: JSON.stringify({ emoji: { unicode: emoji } }) });
+      return false;
+    } catch (error: unknown) {
+      if (error instanceof RequestError && (error.status === 409 || error.apiStatus === "ALREADY_EXISTS")) return true;
+      throw error;
     }
   }
 
@@ -150,7 +229,7 @@ export class ChatClient {
     throw new MailmanError(`수집 상한(${maxPages}페이지)에 도달했습니다. MAILMAN_BACKFILL_DAYS를 줄여 다시 시도하세요.`, 3);
   }
 
-  async createMessage(space: string, body: { text: string; thread?: { name: string } }): Promise<CreatedMessage> {
+  async createMessage(space: string, body: MessageBody, waitMetadata = false): Promise<CreatedMessage> {
     validateSpace(space);
     if (body.thread) validateThread(space, body.thread.name);
     const url = new URL(`https://chat.googleapis.com/v1/${space}/messages`);
@@ -160,6 +239,7 @@ export class ChatClient {
         !isRecord(result.thread) || typeof result.thread.name !== "string" || !result.thread.name.startsWith(`${space}/threads/`)) {
       throw new MailmanError("전송 응답에서 message/thread 이름을 확인할 수 없습니다. 중복 전송을 피하려면 Chat에서 먼저 확인하세요.", 3);
     }
+    if (!waitMetadata) return { name: result.name, thread: { name: result.thread.name } };
     if ((result.createTime !== undefined && typeof result.createTime !== "string") || !optionalFields(result.sender, ["name", "displayName", "type"])) {
       throw new SentMessageError("전송 응답의 시각/발신자 형식이 올바르지 않아 대기를 준비할 수 없습니다.", { name: result.name, thread: { name: result.thread.name } });
     }

@@ -4,7 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { ChatClient } from "./chat";
 import { collectMessages } from "./collector";
 import { errorMessage, MailmanError, RequestError, throwIfAborted } from "./errors";
-import { advanceSeen, groupMessages, renderInbox } from "./fetch";
+import { advanceSeen, groupMessages, renderInboxAsync, type InboxOptions } from "./fetch";
 import { getMeta, toRow, upsertRows, type MessageRow } from "./store";
 import { nanosecondBefore, normalizeTime } from "./time";
 
@@ -27,7 +27,7 @@ export const realClock: WaitClock = {
   },
 };
 
-export type WaitOptions = {
+export type WaitOptions = Pick<InboxOptions, "spaceLabel" | "isDm" | "expandAttachments"> & {
   space: string;
   spaceKey: string;
   startTime: string;
@@ -143,7 +143,7 @@ export async function waitForReplies(db: Database, client: WaitClient, options: 
     }
   };
   let cursor = { create_time: start, name: "" };
-  const boundaryNames = new Set<string>();
+  const boundaryNames = new Set<string>(); // 같은 시각의 이미 받은 행을 DB에 다시 기록하지 않는다.
   const advancePoll = (rows: MessageRow[]) => {
     for (const row of rows) {
       if (row.create_time > cursor.create_time) { cursor = row; boundaryNames.clear(); }
@@ -196,12 +196,12 @@ export async function waitForReplies(db: Database, client: WaitClient, options: 
   const unread = previous.filter(row => !self.has(row.sender_name ?? ""));
   const orderedReplies = [...replies.values()].sort(compareRows);
   const output: string[] = [];
-  const inboxOptions = { spaceKey: options.spaceKey, space: options.space };
+  const inboxOptions = { spaceKey: options.spaceKey, space: options.space, spaceLabel: options.spaceLabel, isDm: options.isDm, expandAttachments: options.expandAttachments };
   if (unread.length) {
-    output.push("# 대기 전부터 있던 안 읽은 메시지", renderInbox(db, inboxOptions, groupMessages(db, options.space, unread)));
+    output.push("# 대기 전부터 있던 안 읽은 메시지", await renderInboxAsync(db, inboxOptions, groupMessages(db, options.space, unread)));
   }
   if (orderedReplies.length) {
-    output.push(`# 답장 ${orderedReplies.length}건(${reason})`, renderInbox(db, inboxOptions, groupMessages(db, options.space, orderedReplies)));
+    output.push(`# 답장 ${orderedReplies.length}건(${reason})`, await renderInboxAsync(db, inboxOptions, groupMessages(db, options.space, orderedReplies)));
   } else output.push("답장 없음");
   if (options.from || options.thread) output.push("필터가 있는 대기는 seen 커서를 유지합니다.");
   if (failure !== undefined) output.push(`대기 실패: ${errorMessage(failure)} seen 커서를 유지합니다.`);

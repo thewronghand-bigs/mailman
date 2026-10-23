@@ -9,8 +9,10 @@ permalink: /
 
 - **대상 찾기**: 스페이스 표시 이름이나 사람 이름·이메일로 기존 방을 찾고, 원하면 새 별칭으로 저장합니다.
 - **조회**: 선택한 스페이스의 새 메시지를 스레드 단위로 정리해 보여 줍니다. 사람/봇 메시지만 골라 볼 수도 있습니다(`--only human`, `--only bot`).
-- **전송**: 사용자가 승인한 텍스트를 본인 명의로 원 스레드에 답글로 보냅니다.
+- **전송**: 사용자가 승인한 텍스트·지정 파일을 본인 명의로 원 스레드에 답글로 보냅니다.
 - **답장 대기**: 짧게 나누어 온 답장을 조용해진 뒤 한 묶음으로 읽습니다.
+- **첨부**: 업로드 첨부를 로컬에 저장하고 작은 텍스트 첨부를 펼쳐 읽습니다. Drive 첨부는 링크만 안내합니다.
+- **리액션**: 작업 관련 메시지를 읽고 보고하면 👀, 실제 반영 완료 뒤 사용자 승인으로 ✅를 답니다.
 - **로컬 저장**: 메시지·토큰·로그는 모두 사용자 기기에만 저장됩니다. 별도 서버가 없습니다.
 - **사용자별 OAuth 클라이언트**: 각 사용자가 자기 Google Cloud 프로젝트에 OAuth 클라이언트를 만들어 씁니다. 배포물에는 어떤 클라이언트 정보도 들어 있지 않습니다.
 
@@ -48,13 +50,23 @@ curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/inst
 mailman auth [--client <client_secret.json>]
 mailman spaces [검색어] [--refresh]
 mailman collect [대상] [--dm <사람>] [--save <별칭>] [--deep]
-mailman fetch [대상] [--dm <사람>] [--save <별칭>] [--since 24h|3d|YYYY-MM-DD] [--only bot|human] [--no-collect] [--deep]
-mailman send [대상] [--dm <사람>] [--save <별칭>] [--thread spaces/.../threads/...] [--agent claude|codex | --no-tag] [--dry-run | --wait] < 본문.txt
+mailman fetch [대상] [--dm <사람>] [--save <별칭>] [--since 24h|3d|YYYY-MM-DD] [--only bot|human] [--no-collect] [--deep] [--with-attachments]
+mailman send [대상] [--dm <사람>] [--save <별칭>] [--attach <파일> ...] [--thread spaces/.../threads/...] [--agent claude|codex | --no-tag] [--dry-run | --wait] < 본문.txt
 mailman wait [대상] [--dm <사람>] [--save <별칭>] [--thread spaces/.../threads/...] [--from <사람>] [--quiet 60s] [--timeout 30m] [--interval 15s]
+mailman download <메시지 name> [--out <디렉터리>] [--print]
+mailman react <메시지 name> <👀|✅>
 mailman --help | --version
 ```
 
 `send`는 로그인한 사용자 명의로 보내며 본문 앞에 `[🤖 AI] ` 태그를 붙입니다(`--agent claude`면 `[🤖 Claude] `, `--agent codex`면 `[🤖 Codex] `). 태그는 설정 `"sendTag": false`로 끄거나 `--no-tag`로 이번 전송만 뺄 수 있습니다.
+
+`send --attach ./handover.md`로 지정한 일반 파일을 최대 10개·각 200MB까지 전송합니다. 심볼릭 링크는 거절하며 미리보기·성공 출력의 경로는 실제 경로(realpath)입니다. 모든 파일 검증과 업로드가 성공한 뒤에만 메시지를 생성하며 업로드 실패 시 메시지는 보내지 않습니다. 본문이 없으면 태그만, 태그가 꺼져 있으면 첨부만 보냅니다. `--dry-run`은 업로드 없이 경로·이름·크기를 표시하고 성공 출력은 파일 이름과 실제 경로를 나열합니다. Claude/Codex는 이 목록을 전송 승인에 포함하고 사용자가 지정하지 않은 파일은 첨부하지 않습니다. .env·키·토큰·자격증명 파일은 첨부하지 않고 경고합니다. 작성 요청을 받은 핸드오버 md는 먼저 파일로 쓴 뒤 경로를 승인받아 첨부합니다. 기존 전송 권한만 사용합니다.
+
+첨부 줄의 download 힌트로 파일을 받습니다(파일당 최대 50MB). 기본 저장 위치는 `$MAILMAN_HOME/mailman/attachments/<space id>/<message id>/`, 파일 0600·디렉터리 0700이며 기본 경로에서 같은 소스·이름·저장 크기의 캐시를 재사용합니다. `--out`은 기존 디렉터리 권한을 유지하고 새 디렉터리만 0700으로 만듭니다. `--out`에는 재사용 기록을 남기지 않고 매번 새 파일로 받습니다. 30초 무수신 또는 전체 10분 초과 시 중단합니다. `--print`는 256KB 이하 텍스트만 출력합니다. `fetch`·`wait`·`send --wait`의 `--with-attachments`는 메시지당 작은 텍스트 첨부 최대 3개를 펼치고 실패 사유를 표시해 조회를 계속합니다. Drive 첨부는 링크/파일 ID와 미지원 안내만 표시합니다.
+
+`react`는 👀·✅만 허용하고 이미 같은 리액션이 있으면 성공으로 처리합니다. Claude/Codex는 작업 관련 스펙·요청·핸드오버를 읽고 보고한 뒤 👀를 자동으로 달며, ✅는 실제 반영 완료 후 사용자 승인으로 답니다. 리액션은 해당 내용을 보낸 메시지(스펙·요청·핸드오버 그 자체)의 `message name`에 달고 사용자 본인 메시지에는 달지 않습니다. 잡담에는 달지 않습니다. `local.md`도 ✅ 승인·전송 승인을 완화할 수 없습니다. 기존 사용자는 리액션을 쓰기 전에 `mailman auth`를 다시 실행하세요. 기존 토큰에 선택 리액션 스코프가 없으면 react만 exit 2이며 조회·전송은 그대로 동작합니다.
+
+DM과 단발 메시지는 시각·발신자·본문·message name의 시간순 간결 목록으로 표시합니다. DM은 실제 스레드도 간결 목록이므로 이전 맥락과 생략 건수를 붙이지 않습니다. 그룹 스레드도 각 메시지에 한 줄 message name을 표시합니다. 그룹의 실제 스레드는 기존 머리·이전 맥락을 유지합니다. 방 라벨은 표시 이름 또는 `DM: 이름 또는 users/ID`이며 대기 중 받은 발신자 이름도 반영합니다.
 
 대상은 config 별칭 → `spaces/ID` → `--dm <사람>` → 표시 이름 순서로 해석합니다. 후보가 여러 개면 목록을 보여 주고 선택을 요청하며 임의로 고르지 않습니다. ID를 직접 찾을 필요가 없습니다. 미등록 방도 이번 호출에서만 사용할 수 있고 `--save`만 별칭을 추가합니다(덮어쓰기 금지). `send --dry-run`으로 해석된 대상과 본문을 확인합니다.
 
