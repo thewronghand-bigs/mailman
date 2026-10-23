@@ -29,7 +29,7 @@ describe("안 읽은 메시지와 seen 커서", () => {
       const items = [
         message("old", "2026-10-21T11:59:59Z", { thread: undefined }),
         message("boundary", "2026-10-21T12:00:00Z", { thread: undefined }),
-        message("human", "2026-10-21T12:00:00.000000001Z", { sender: { type: "HUMAN", displayName: "의현" }, text: "일반 사람 대화", thread: undefined }),
+        message("human", "2026-10-21T12:00:00.000000001Z", { sender: { type: "HUMAN", displayName: "홍길동" }, text: "일반 사람 대화", thread: undefined }),
         message("bot", "2026-10-22T09:00:00Z", { sender: { type: "BOT", displayName: "알림봇" }, thread: undefined }),
         message("self", "2026-10-22T10:00:00Z", { sender: { type: "HUMAN" }, text: `${SEND_PREFIX}완료`, thread: undefined }),
         message("literal", "2026-10-22T11:00:00Z", { sender: { type: "HUMAN" }, text: "@mailman 예전 본문", thread: undefined }),
@@ -46,7 +46,7 @@ describe("안 읽은 메시지와 seen 커서", () => {
         expect(getMeta(db, SEEN)).toBeUndefined();
       });
       expect(output).toContain("일반 사람 대화");
-      expect(output).toContain("— 의현 (HUMAN) [새 메시지]");
+      expect(output).toContain("— 홍길동 (HUMAN) [새 메시지]");
       expect(output).toContain("— 알림봇 (BOT) [새 메시지]");
       expect(output).toContain(`${SEND_PREFIX}완료`);
       expect(output).toContain("@mailman 예전 본문");
@@ -290,6 +290,31 @@ describe("기간 조회", () => {
       expect(getMeta(db, SEEN)).toBe(seen);
       expect(getMeta(db, SEEN_NAME)).toBeUndefined();
       expect(queryInbox(db, options).newCount).toBe(200);
+    } finally { db.close(); }
+  });
+
+  test("--only 필터는 상한 계산에도 적용되고 이어보기 대신 기간 조회를 안내하며 seen을 저장하지 않는다", async () => {
+    const db = openDatabase(":memory:");
+    try {
+      const humans = batch(3).map((item, index) => ({ ...item, name: `${SPACE}/messages/human-${index}`, sender: { type: "HUMAN" } }));
+      save(db, [...batch(201), ...humans]);
+      const options = { ...OPTIONS, only: "BOT" as const };
+      const page = queryInbox(db, options);
+      expect(page.newCount).toBe(200);
+      expect(page.remaining).toBe(1);
+      expect(page.threads.flatMap(thread => thread.messages).every(row => row.sender_type === "BOT")).toBe(true);
+      let output = "";
+      await printInbox(db, options, text => { output = text; });
+      expect(output).toContain("1건 더 남음 — --only 조회는 seen을 바꾸지 않아 다시 실행해도 같은 메시지가 나옵니다. --since를 지정하거나 좁혀서 조회하세요.");
+      expect(output).not.toContain("다시 실행하면 이어서");
+      expect(getMeta(db, SEEN)).toBeUndefined();
+      expect(getMeta(db, SEEN_NAME)).toBeUndefined();
+      expect(queryInbox(db, { ...OPTIONS, only: "HUMAN" }).newCount).toBe(3);
+
+      // --since와 함께 쓰면 기간을 좁히라는 안내만 낸다.
+      await printInbox(db, { ...options, since: parseSince("7d", NOW) }, text => { output = text; });
+      expect(output).toContain("1건 더 남음 — --since를 좁혀서 다시 조회하세요.");
+      expect(output).not.toContain("--only 조회는");
     } finally { db.close(); }
   });
 });

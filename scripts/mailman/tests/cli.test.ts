@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { main, parseArguments } from "../cli";
 import { SEND_PREFIX } from "../content";
-import { getRuntimePaths, loadConfig, resolveSpace } from "../runtime";
+import { getRuntimePaths, loadConfig, resolveSpace, SETUP_GUIDE_URL } from "../runtime";
 import { getMeta, openDatabase, setMeta, toRow, upsertRows } from "../store";
 import { cleanupFixtures, fixture, json, message, mockFetch, SPACE, THREAD } from "./helpers";
 
@@ -13,16 +13,26 @@ const NOW = new Date("2026-10-22T12:00:00Z");
 
 describe("CLI와 경로", () => {
   test("데이터 경로와 인증정보 경로를 각각 덮어쓴다", () => {
-    const paths = getRuntimePaths(import.meta.url, { MAILMAN_HOME: "/custom/data" });
+    const paths = getRuntimePaths({ MAILMAN_HOME: "/custom/data" });
     expect(paths.dbPath).toBe("/custom/data/inbox/mailman-v2.db");
     expect(paths.tokenFile).toBe(join(homedir(), ".claude/secrets/mailman-token.json"));
-    const overridden = getRuntimePaths(import.meta.url, { MAILMAN_CLIENT_FILE: "/custom/client.json", MAILMAN_TOKEN_FILE: "/custom/token.json" });
+    const overridden = getRuntimePaths({ MAILMAN_CLIENT_FILE: "/custom/client.json", MAILMAN_TOKEN_FILE: "/custom/token.json" });
     expect(overridden.clientFile).toBe("/custom/client.json");
     expect(overridden.tokenFile).toBe("/custom/token.json");
   });
 
+  test("설정 파일은 스크립트 위치가 아닌 $MAILMAN_HOME/mailman/config.json이고 MAILMAN_CONFIG로 덮는다", () => {
+    expect(getRuntimePaths({}).configFile).toBe(join(homedir(), ".claude/mailman/config.json"));
+    expect(getRuntimePaths({ MAILMAN_HOME: "/custom/data" }).configFile).toBe("/custom/data/mailman/config.json");
+    expect(getRuntimePaths({ MAILMAN_HOME: "/custom/data", MAILMAN_CONFIG: "/etc/mailman.json" }).configFile).toBe("/etc/mailman.json");
+    expect(getRuntimePaths({ MAILMAN_CONFIG: "~/conf/mailman.json" }).configFile).toBe(join(homedir(), "conf/mailman.json"));
+    const missing = join(fixture(false).home, "없는 설정.json");
+    expect(() => loadConfig(missing)).toThrow(missing);
+    expect(() => loadConfig(missing)).toThrow(SETUP_GUIDE_URL);
+  });
+
   test("별칭 생략은 기본 스페이스, 잘못된 별칭은 에러다", () => {
-    const config = loadConfig(fixture().scriptDir);
+    const config = loadConfig(fixture().configFile);
     expect(resolveSpace(config).space.space).toBe(SPACE);
     expect(() => resolveSpace(config, "없는별칭")).toThrow("등록되지 않은");
     expect(parseArguments("fetch", []).spaceKey).toBeUndefined();
@@ -32,11 +42,11 @@ describe("CLI와 경로", () => {
     for (const args of [["tn", "3"], ["--all"], ["tn", "봇별칭"], ["--since"], ["--since", "--helpful"], ["--since", "0d"], ["--since", "7d", "--since", "3d"]]) {
       expect(() => parseArguments("fetch", args, NOW)).toThrow();
     }
-    expect(() => parseArguments("run", ["--since", "7d"])).toThrow();
+    expect(() => parseArguments("collect", ["--since", "7d"])).toThrow();
     expect(() => parseArguments("send", ["--since", "7d"])).toThrow();
   });
 
-  test("토큰 없음은 run exit 2이고 fetch는 기존 DB를 계속 보여준다", async () => {
+  test("토큰 없음은 collect exit 2이고 fetch는 기존 DB를 계속 보여준다", async () => {
     const paths = fixture(false);
     const db = openDatabase(paths.dbPath);
     upsertRows(db, [toRow(message("cached", "2026-10-22T11:00:00Z", { text: "기존 DB 본문" }), SPACE, NOW.toISOString())]);
@@ -45,7 +55,7 @@ describe("CLI와 경로", () => {
     const errors: string[] = [];
     const { fetcher, calls } = mockFetch(() => { throw new Error("호출하면 안 됨"); });
     const dependencies = { paths, fetcher, now: NOW, stdout: (text: string) => output.push(text), stderr: (text: string) => errors.push(text) };
-    expect(await main(["run", "tn"], dependencies)).toBe(2);
+    expect(await main(["collect", "tn"], dependencies)).toBe(2);
     expect(await main(["fetch", "tn"], dependencies)).toBe(0);
     expect(output.join("\n")).toContain("기존 DB 본문");
     expect(errors.join("\n")).toContain("기존 DB 내용을 표시");
@@ -107,14 +117,14 @@ describe("CLI와 경로", () => {
     const paths = fixture();
     const { fetcher, calls } = mockFetch(() => json({ error: "invalid_grant", error_description: "fixture-refresh-secret fixture-client-secret" }, 400));
     const errors: string[] = [];
-    expect(await main(["run"], { paths, fetcher, stderr: text => errors.push(text) })).toBe(3);
-    expect(errors.join("\n")).toContain("다시 run.sh auth");
+    expect(await main(["collect"], { paths, fetcher, stderr: text => errors.push(text) })).toBe(3);
+    expect(errors.join("\n")).toContain("다시 mailman auth");
     expect(errors.join("\n")).not.toContain("fixture-refresh-secret");
     expect(errors.join("\n")).not.toContain("fixture-client-secret");
     const log = readFileSync(paths.logFile, "utf8");
     expect(log.trim().split("\n")).toHaveLength(1);
     expect(log).toContain(`space=${SPACE} 수집 실패:`);
-    expect(log).toContain("다시 run.sh auth");
+    expect(log).toContain("다시 mailman auth");
     expect(log).not.toContain("fixture-refresh-secret");
     expect(log).not.toContain("fixture-client-secret");
     expect(calls).toHaveLength(1);
@@ -125,15 +135,15 @@ describe("CLI와 경로", () => {
     const paths = fixture();
     const { fetcher } = mockFetch((_url, _init, index) => index === 0
       ? json({ access_token: "fixture-access-secret" }) : json({ messages: [message("one")] }));
-    expect(await main(["run"], { paths, fetcher, stderr: () => {} })).toBe(0);
+    expect(await main(["collect"], { paths, fetcher, stderr: () => {} })).toBe(0);
     const log = readFileSync(paths.logFile, "utf8");
     expect(log.trim().split("\n")).toHaveLength(1);
     expect(log).toContain(`space=${SPACE} received=1 saved=1`);
     expect(log).not.toContain("fixture-access-secret");
   });
 
-  test("run/fetch의 네트워크·API 실패를 비밀값 없이 한 줄로 기록하고 stderr도 유지한다", async () => {
-    for (const command of ["run", "fetch"]) {
+  test("collect/fetch의 네트워크·API 실패를 비밀값 없이 한 줄로 기록하고 stderr도 유지한다", async () => {
+    for (const command of ["collect", "fetch"]) {
       for (const failure of ["network", "api"]) {
         const paths = fixture();
         const errors: string[] = [];
@@ -142,7 +152,7 @@ describe("CLI와 경로", () => {
           if (failure === "network") throw new Error("fixture-access-secret fixture-refresh-secret fixture-client-secret");
           return json({ error: { message: "권한 없음\nfixture-access-secret fixture-refresh-secret fixture-client-secret Bearer fixture-bearer-secret https://chat.googleapis.com/v1/spaces/test/messages?key=fixture-webhook-key&token=fixture-webhook-token" } }, 403);
         });
-        expect(await main([command], { paths, fetcher, stderr: text => errors.push(text), stdout: () => {} })).toBe(command === "run" ? 3 : 0);
+        expect(await main([command], { paths, fetcher, stderr: text => errors.push(text), stdout: () => {} })).toBe(command === "collect" ? 3 : 0);
         const log = readFileSync(paths.logFile, "utf8");
         const expected = failure === "network" ? "네트워크 요청에 실패" : "HTTP 403: 권한 없음";
         expect(log.trim().split("\n")).toHaveLength(1);
@@ -161,7 +171,7 @@ describe("CLI와 경로", () => {
     const paths = fixture(false);
     mkdirSync(paths.logFile, { recursive: true });
     const errors: string[] = [];
-    expect(await main(["run"], { paths, stderr: text => errors.push(text) })).toBe(2);
+    expect(await main(["collect"], { paths, stderr: text => errors.push(text) })).toBe(2);
     expect(errors.join("\n")).toContain("수집 실패 로그를 기록할 수 없습니다.");
     expect(errors.join("\n")).toContain("토큰 파일이 없습니다.");
   });
@@ -207,20 +217,22 @@ describe("CLI와 경로", () => {
     expect(calls).toHaveLength(0);
   });
 
-  test("세 래퍼의 help/인자 오류는 설정을 읽거나 런타임 파일을 만들지 않는다", () => {
+  test("mailman-dev의 help/버전/인자 오류는 설정을 읽거나 런타임 파일을 만들지 않는다", () => {
     const paths = fixture(false);
-    const scriptDir = join(import.meta.dir, "..");
-    const cases: Array<[string, string[], number]> = [
-      ["run", ["--help"], 0], ["fetch", ["--help"], 0], ["send", ["--help"], 0],
-      ["run", ["auth", "extra"], 1], ["fetch", ["tn", "3"], 1], ["fetch", ["--all"], 1],
-      ["fetch", ["--since"], 1], ["fetch", ["--since", "2026-02-30"], 1], ["send", ["--thread"], 1],
+    const devRunner = join(import.meta.dir, "..", "mailman-dev");
+    const cases: Array<[string[], number]> = [
+      [["--help"], 0], [["--version"], 0], [["auth", "--help"], 0], [["collect", "--help"], 0], [["fetch", "--help"], 0], [["send", "--help"], 0],
+      [[], 1], [["bogus"], 1], [["run"], 1], [["auth", "extra"], 1], [["auth", "--client"], 1], [["collect", "--since", "7d"], 1],
+      [["fetch", "tn", "3"], 1], [["fetch", "--all"], 1], [["fetch", "--since"], 1], [["fetch", "--since", "2026-02-30"], 1],
+      [["fetch", "--only"], 1], [["fetch", "--only", "robot"], 1], [["fetch", "--deep", "--no-collect"], 1], [["send", "--thread"], 1],
     ];
-    for (const [wrapper, args, status] of cases) {
-      const result = Bun.spawnSync(["bash", join(scriptDir, `${wrapper}.sh`), ...args], {
-        env: { ...process.env, MAILMAN_HOME: paths.home, MAILMAN_CLIENT_FILE: paths.clientFile, MAILMAN_TOKEN_FILE: paths.tokenFile },
+    for (const [args, status] of cases) {
+      const result = Bun.spawnSync(["bash", devRunner, ...args], {
+        env: { ...process.env, MAILMAN_HOME: paths.home, MAILMAN_CONFIG: join(paths.home, "없는-설정.json"),
+          MAILMAN_CLIENT_FILE: paths.clientFile, MAILMAN_TOKEN_FILE: paths.tokenFile },
         stdin: Buffer.from(""),
       });
-      expect(result.exitCode).toBe(status);
+      expect([args, result.exitCode]).toEqual([args, status]);
       expect(result.stdout.toString() + result.stderr.toString()).not.toContain("SyntaxError");
     }
     expect(existsSync(paths.dbPath)).toBe(false);

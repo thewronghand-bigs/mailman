@@ -5,10 +5,11 @@
   "description": "사용자 OAuth와 Google Chat API로 수집·조회·전송하는 로컬 메일함",
   "type": "module",
   "scripts": {
-    "auth": "bun cli.ts run auth",
-    "collect": "bun cli.ts run",
+    "auth": "bun cli.ts auth",
+    "collect": "bun cli.ts collect",
     "fetch": "bun cli.ts fetch",
     "send": "bun cli.ts send",
+    "build": "bash ../build.sh",
     "test": "bun test"
   }
 }

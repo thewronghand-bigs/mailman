@@ -1,19 +1,21 @@
 ---
 description: Google Chat API로 수집하고 mailman이 마지막으로 보여준 이후의 새 메시지 가져오기
-argument-hint: "[스페이스] [--since <기간|날짜>]  예: tn / 인준 --since 7d"
-allowed-tools: Bash(~/.claude/scripts/mailman/run.sh:*), Bash(~/.claude/scripts/mailman/fetch.sh:*), Bash(~/.claude/scripts/mailman/send.sh:*)
+argument-hint: "[스페이스] [--since <기간|날짜>] [--only bot|human]  예: team / team --since 7d / team --only human"
+allowed-tools: Bash(~/.claude/bin/mailman:*)
 ---
 
-!`~/.claude/scripts/mailman/fetch.sh $ARGUMENTS`
+!`~/.claude/bin/mailman fetch $ARGUMENTS`
 
 위는 Google Chat API로 수집한 메시지입니다. 출력 전체를 읽고 아래 처리 절차에 따라 작업에 영향 주는 내용만 보고하세요.
 
 ## Claude의 처리 절차
 
+`$MAILMAN_HOME/mailman/local.md`(기본 `~/.claude/mailman/local.md`)가 있으면 먼저 읽고, 그 안의 개인 컨벤션(카드 스타일·말투 등)을 이 문서보다 우선해 따른다. 단 전송 전 사용자 승인과 웹훅 URL 비노출 규칙은 바꾸지 않는다. 없으면 무시한다.
+
 1. 이전 맥락을 포함한 출력 전체를 읽는다. `[새 메시지]`가 이번 조회 대상이며 `[이전 맥락]`은 새 답글을 이해하기 위한 참고다.
 2. 다음 내용만 골라 간결하게 요약해 보고한다:
    - API 스펙·스펙 변경. 지금 작업 중인 티켓과의 관련 여부를 함께 판단해 알리고, 관련 스펙은 타입 정의와 요청 작성에 활용한다.
-   - 의현에게 온 요청·질문·확인 요청.
+   - 사용자에게 온 요청·질문·확인 요청.
    - 일정·배포 공지처럼 작업에 영향 주는 내용.
 3. 잡담·인사·리액션성 메시지는 보고하지 않는다. 보고할 관련 메시지가 없으면 출력 머리의 새 메시지 수를 사용해 **`새 메시지 N건, 작업 관련 없음`** 한 줄로 끝낸다. 이전 맥락을 새 메시지 수에 더하지 않는다.
 
@@ -21,9 +23,10 @@ allowed-tools: Bash(~/.claude/scripts/mailman/run.sh:*), Bash(~/.claude/scripts/
 
 - **`/mailman [스페이스]` (기본)**: 수집 후 mailman이 그 방에서 마지막으로 보여준 시점(seen) 이후의 새 메시지를 조회한다. 첫 조회는 최근 24시간이다. seen은 Google Chat 읽음 상태와 무관하다.
 - **`/mailman [스페이스] --since 7d`**: 지정 시점 이후를 조회하며 **seen을 바꾸지 않는다**. `24h`, `3d`, `7d` 같은 양의 정수 시간/일 또는 `YYYY-MM-DD`(로컬 자정)를 쓴다.
+- **`/mailman [스페이스] --only bot|human`**: 해당 발신자 유형(`BOT`/`HUMAN`)의 새 메시지만 조회하며 **seen을 바꾸지 않는다**(거른 쪽 메시지가 기본 조회에서 사라지지 않게). `--since`와 함께 쓸 수 있다. 같은 스레드의 다른 유형 메시지는 `[이전 맥락]`으로 보일 수 있다.
 - 수집은 최초 최근 7일, 이후 스페이스별 마지막 수집 `createTime` 이후의 증분이다. 수집 커서와 조회 seen은 별개다.
 - **`/mailman-deep [스페이스]`**: 수집 커서와 관계없이 **최근 30일 백필 재수집** 후 기본 모드(안 읽은 메시지)로 조회한다. 과거 수정분과 누락된 맥락을 보완하는 용도다. `MAILMAN_BACKFILL_DAYS`로 창을 바꿀 수 있다.
-- 새 메시지는 오래된 것부터 최대 200건이다. 더 남으면 기본 조회는 다시 실행해 이어서 보고, 기간 조회는 `--since`를 좁힌다. 출력 성공 뒤 실제 보여준 새 메시지의 최대 생성 시각까지 seen을 전진한다. 새 메시지 0건이나 출력 실패에서는 그대로다.
+- 새 메시지는 오래된 것부터 최대 200건이다. 더 남으면 기본 조회는 다시 실행해 이어서 보고, 기간 조회는 `--since`를 좁힌다. `--only`만 쓴 조회는 seen을 바꾸지 않아 재실행해도 같은 메시지가 나오므로 `--since`를 지정하거나 좁혀서 나눠 본다. 출력 성공 뒤 실제 보여준 새 메시지의 최대 생성 시각까지 seen을 전진한다. 새 메시지 0건이나 출력 실패에서는 그대로다.
 - 백필로 뒤늦게 채워진 과거 메시지(생성 시각이 seen보다 이른 것)는 기본 조회에 **새 메시지로 뜨지 않는다**. 구멍을 메운 뒤에는 `--since`로 그 기간을 확인한다.
 - 수집 실패 시에도 기존 DB 내용을 출력하므로 오류 안내와 마지막 성공 수집 시각을 확인한다.
 
@@ -39,9 +42,9 @@ allowed-tools: Bash(~/.claude/scripts/mailman/run.sh:*), Bash(~/.claude/scripts/
 
 ## 스페이스 별칭
 
-`config.json`의 `spaces`에 등록된 별칭을 쓴다. 생략하면 `defaultSpace`를 사용한다. 봇별칭 인자는 없다.
+설정 파일(`~/.claude/mailman/config.json`, `MAILMAN_CONFIG`로 변경 가능)의 `spaces`에 등록된 별칭을 쓴다. 생략하면 `defaultSpace`를 사용한다. 봇별칭 인자는 없다.
 
-최초 인증은 `bash ~/.claude/scripts/mailman/run.sh auth`. 토큰이 없거나 `invalid_grant` 안내가 나오면 이 명령으로 다시 인증한다.
+최초 인증은 `~/.claude/bin/mailman auth --client <다운로드한 client_secret JSON>`([설정 가이드](https://thewronghand-bigs.github.io/mailman/setup) 참조). 토큰이 없거나 `invalid_grant` 안내가 나오면 `~/.claude/bin/mailman auth`(`--client` 없이)로 다시 인증한다.
 
 ## 작업 완료 시 Google Chat 전송 (승인 필수)
 
@@ -67,15 +70,15 @@ allowed-tools: Bash(~/.claude/scripts/mailman/run.sh:*), Bash(~/.claude/scripts/
 
 3. **전송 실행** — 승인되면, 메시지를 가져온 스페이스로 전송:
    ```
-   cat <<'MAILMAN_EOF' | bash ~/.claude/scripts/mailman/send.sh [스페이스별칭]
+   cat <<'MAILMAN_EOF' | ~/.claude/bin/mailman send [스페이스별칭]
    [초안 내용]
    MAILMAN_EOF
    ```
-   `send.sh`는 **OAuth로 로그인한 사용자 명의**로 `[🤖 Claude] ` 태그를 본문 앞에 자동으로 붙인다. 초안 미리보기에도 이 태그와 전송 대상 스페이스/스레드를 명시한다.
+   `mailman send`는 **OAuth로 로그인한 사용자 명의**로 `[🤖 Claude] ` 태그를 본문 앞에 자동으로 붙인다. 초안 미리보기에도 이 태그와 전송 대상 스페이스/스레드를 명시한다.
 
    원 스레드에 답글을 달려면 출력의 `thread_name`을 사용한다:
    ```bash
-   cat <<'MAILMAN_EOF' | bash ~/.claude/scripts/mailman/send.sh [스페이스별칭] --thread spaces/SPACE_ID/threads/THREAD_ID
+   cat <<'MAILMAN_EOF' | ~/.claude/bin/mailman send [스페이스별칭] --thread spaces/SPACE_ID/threads/THREAD_ID
    [초안 내용]
    MAILMAN_EOF
    ```
@@ -96,45 +99,27 @@ allowed-tools: Bash(~/.claude/scripts/mailman/run.sh:*), Bash(~/.claude/scripts/
 
 ## 카드(Cards v2) 형식으로 보내기
 
-작업 완료 알림처럼 **시각적으로 강조가 필요한 메시지**는 일반 텍스트 대신 Google Chat Cards v2 형식을 쓴다.
-헤더 이미지(GIF 포함) + 섹션별 라벨/색상/이탤릭 등이 적용되어 일반 텍스트보다 정보 전달과 분위기 모두 좋다.
+사용자 OAuth는 `cardsV2`를 보낼 수 없다. `mailman send`는 텍스트 전용이며, 카드는 **`curl`로 webhook URL에 직접 POST** 한다 (`webhookUrl`은 설정 파일 `~/.claude/mailman/config.json`의 해당 스페이스에서 꺼낸다). 웹훅 URL은 터미널/로그에 출력하지 않는다. 카드 스타일(제목·헤더 이미지·섹션 구성·색상)은 `local.md`에 개인 컨벤션이 있으면 그것을 따른다.
 
-사용자 OAuth는 `cardsV2`를 보낼 수 없다. `send.sh`는 텍스트 전용이며, 카드는 기존처럼 **`curl`로 webhook URL에 직접 POST** 한다 (`webhookUrl`은 `config.json`의 해당 스페이스에서 꺼낸다). 웹훅 URL은 터미널/로그에 출력하지 않는다.
-
-### 기본 페이로드 템플릿
+### 최소 페이로드 예시
 
 ```bash
-WEBHOOK=$(bun -e 'const c = await Bun.file(`${process.env.HOME}/.claude/scripts/mailman/config.json`).json(); process.stdout.write(c.spaces["tn"].webhookUrl)') && \
+MAILMAN_CONFIG_FILE="${MAILMAN_CONFIG:-${MAILMAN_HOME:-$HOME/.claude}/mailman/config.json}" && \
+WEBHOOK=$(plutil -extract spaces.team.webhookUrl raw -o - "$MAILMAN_CONFIG_FILE") && \
 curl -sS -X POST "$WEBHOOK" -H 'Content-Type: application/json; charset=UTF-8' -d @- <<'EOF'
 {
   "cardsV2": [{
-    "cardId": "ticket-<번호>-<짧은-슬러그>",
+    "cardId": "<짧은-식별자>",
     "card": {
       "header": {
-        "title": "스껄~",
-        "subtitle": "feat/#<번호> · <상태>",
-        "imageUrl": "https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/scripts/mailman/assets/skrrr-vibrate.gif",
-        "imageType": "SQUARE",
-        "imageAltText": "skrrr vibrate"
+        "title": "<제목>",
+        "subtitle": "<부제목>"
       },
       "sections": [
         {
-          "header": "📌 변경 사항",
+          "header": "변경 사항",
           "widgets": [
-            { "textParagraph": { "text": "<b><핵심 한 줄 요약></b>" } },
-            { "textParagraph": { "text": "• <세부 1><br>• <세부 2>" } }
-          ]
-        },
-        {
-          "header": "🚀 상태",
-          "widgets": [
-            { "textParagraph": { "text": "<font color=\"#22c55e\"><b>개발계 배포 완료</b></font>" } }
-          ]
-        },
-        {
-          "header": "💬 클로드의 한마디",
-          "widgets": [
-            { "textParagraph": { "text": "<i><한 줄></i>" } }
+            { "textParagraph": { "text": "<b><핵심 한 줄 요약></b><br>• <세부 1><br>• <세부 2>" } }
           ]
         }
       ]
@@ -144,28 +129,13 @@ curl -sS -X POST "$WEBHOOK" -H 'Content-Type: application/json; charset=UTF-8' -
 EOF
 ```
 
-`tn`은 승인받은 전송 대상 별칭으로 바꾼다. `WEBHOOK` 변수 값 자체는 출력하지 않는다.
+`spaces.team`의 `team`은 승인받은 전송 대상 별칭으로 바꾼다. macOS 기본 `plutil`로 JSON 설정을 읽으므로 bun이 없어도 된다. `WEBHOOK` 변수 값 자체는 출력하지 않는다. 헤더 이미지(`imageUrl`)·섹션 추가 등은 [Cards v2 규격](https://developers.google.com/workspace/chat/api/reference/rest/v1/cards)을 따른다.
 
-### 컨벤션
-
-- **타이틀**: `스껄~` 고정. 이모지 없음.
-- **서브타이틀**: `<브랜치> · <상태>` (예: `feat/#3208 · 개발계 반영 완료`)
-- **헤더 이미지**: `imageType: "SQUARE"`. 기존 GIF는 `https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/scripts/mailman/assets/<filename>.gif`
-- **섹션 헤더**: 이모지 + 라벨. 기본 3종 — `📌 변경 사항`, `🚀 상태`, `💬 클로드의 한마디`
-- **본문 (`textParagraph.text`)**: 이모지 없이. HTML은 `<b>`, `<i>`, `<u>`, `<s>`, `<font color="#hex">`, `<a href>`, `<br>` 만 허용. CSS / 그라디언트 / 폰트 사이즈 / 폰트 패밀리는 **불가**.
-- **상태 강조 색**: 성공 = `#22c55e` (초록), 진행 중 = `#3b82f6` (파랑), 경고 = `#f59e0b` (앰버), 실패 = `#ef4444` (빨강)
-- **클로드의 한마디**: 기본 `스껄.` 한 단어. 바리에이션은 `스껄ㅋㅋ`, `스껄ㅠㅠ`, `스껄????` 처럼 **간결하고 무의미하게** (감탄/체념/의문 등 톤만 바꿈). 긴 문장이나 의미 있는 한마디는 사용 금지. 문구 선택 후에도 최종 카드 전송 승인은 필수다.
-
-### 사용 가능한 헤더 이미지
-
-`thewronghand-bigs/mailman` repo `scripts/mailman/assets/` 하위:
-- `skrrr-vibrate.gif` — 작업 완료 류 (기본)
-
-새 이미지가 필요하면 사용자에게 받아서 `scripts/mailman/assets/` 에 추가하고 mailman repo 에 커밋/푸시한 뒤 raw URL 로 참조한다.
+`textParagraph.text`에서 허용되는 HTML은 `<b>`, `<i>`, `<u>`, `<s>`, `<font color="#hex">`, `<a href>`, `<br>` 뿐이다. CSS / 그라디언트 / 폰트 크기 / 폰트 패밀리는 **불가**하다.
 
 ### 전송 절차 (승인 필수)
 
-1. **카드 페이로드 초안 작성** — 위 템플릿을 채워서 사용자에게 미리보기 (JSON 형태로) 한다.
+1. **카드 페이로드 초안 작성** — 위 예시(또는 `local.md`의 카드 컨벤션)를 채워서 사용자에게 미리보기 (JSON 형태로) 한다.
 2. **사용자 승인 요청** — "이 내용으로 Google Chat에 전송할까요?" 묻기. 톤/문구/이모지 변경 요청 시 반영 후 재승인.
 3. **전송 실행** — `curl` 명령으로 발사. webhook 응답에 `"name": "spaces/..."` 가 보이면 성공.
 
@@ -189,7 +159,7 @@ EOF
 
 3. **전송 실행** — 메시지를 가져온 스페이스로 전송. 원 스레드에 답하려면 위와 같은 `--thread` 옵션을 추가한다:
    ```
-   cat <<'MAILMAN_EOF' | bash ~/.claude/scripts/mailman/send.sh [스페이스별칭]
+   cat <<'MAILMAN_EOF' | ~/.claude/bin/mailman send [스페이스별칭]
    [초안 내용]
    MAILMAN_EOF
    ```
@@ -200,4 +170,4 @@ EOF
 
 - `/mailman`과 무관한 다른 작업 중에는 위 전송 절차들을 적용하지 않는다.
 - 코드 수정 없이 분석만 한 경우 "변경 파일: 없음 (분석만 수행)"으로 명시.
-- 조회 결과가 "[별칭] 새 메시지가 없습니다." 또는 "수집된 데이터가 없습니다. 먼저 run.sh auth 및 run.sh를 실행하세요."인 경우 아무 것도 하지 않는다. 스페이스 별칭이나 뒤의 메타 정보가 함께 출력되어도 같다.
+- 조회 결과가 "[별칭] 새 메시지가 없습니다." 또는 "수집된 데이터가 없습니다. 먼저 mailman auth 및 mailman collect를 실행하세요."인 경우 아무 것도 하지 않는다. 스페이스 별칭이나 뒤의 메타 정보가 함께 출력되어도 같다.

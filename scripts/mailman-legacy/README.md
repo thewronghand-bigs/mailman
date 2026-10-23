@@ -66,6 +66,5 @@ bash run.sh [스페이스별칭]
 ## 메모
 
 - `auth.ts`, `collector.ts`, `fetch.ts`, `send.ts` 는 같은 설정 해석 로직을 사용한다.
-- Claude Code 연결은 상위 `commands/mailman.md` 와 `docs/claude.md` 에서 설명한다.
-- Codex 사용법은 상위 `docs/codex.md` 에서 설명한다.
+- (레거시 시절 문서인 `docs/claude.md`·`docs/codex.md`는 v2에서 삭제됐다. 현재 사용법은 루트 README 참고.)
 - snapshot driver는 저장된 JSON 메시지 배열만 적재한다. 답글 펼침이 필요하면 snapshot 추출 전에 브라우저 쪽에서 먼저 펼쳐야 한다.

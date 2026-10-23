@@ -1,8 +1,8 @@
 {
-  "defaultSpace": "tn",
+  "defaultSpace": "team",
   "spaces": {
-    "tn": {
-      "space": "spaces/AAQAgRGQTic",
+    "team": {
+      "space": "spaces/SPACE_ID",
       "webhookUrl": ""
     }
   }
