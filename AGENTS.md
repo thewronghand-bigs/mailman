@@ -6,7 +6,7 @@ Google Chat API를 사용자 OAuth로 호출해 메시지를 SQLite에 저장하
 
 - `scripts/mailman/`: 새 v2 런타임. 설정 해석은 `runtime.ts`, OAuth는 `auth.ts`, API는 `chat.ts`, 저장은 `store.ts`에 집중한다.
 - `collector.ts`는 모든 메시지를 증분/백필 수집하며 `fetch.ts`가 seen 커서와 스레드 출력을 담당한다.
-- `content.ts`의 `SEND_TAG`를 써서 `send.ts`가 사용자 명의 텍스트/답글을 전송한다.
+- `send.ts`가 사용자 명의 텍스트/답글을 전송한다. 태그 접두사(`content.ts`의 `sendPrefix`)는 `runtime.ts`의 `resolveSendPrefix`가 정한다.
 - `cli.ts`가 단일 진입점이다: `mailman <auth|collect|fetch|send>`, `--help`, `--version`. 개발 실행은 `scripts/mailman/mailman-dev`, 빌드는 `scripts/build.sh`(`dist/`, gitignore).
 - `install.sh`는 릴리스 바이너리와 커맨드·스킬을 모두 받아 검증한 뒤 한꺼번에 설치하고(실패 시 기존 설치 유지) `--dev`는 레포를 심볼릭 링크한다. `--target claude|codex|all`(또는 `MAILMAN_TARGET`)로 대상을 고른다. 실행 파일 백업은 `mailman.bak` 1개다. `docs/`는 GitHub Pages 공개 문서(홈·설정 가이드·개인정보처리방침)이며 사내 정보·실명을 넣지 않는다.
 - `codex-skills/mailman/SKILL.md`: Codex `$mailman` 스킬(`${CODEX_HOME:-~/.codex}/skills/mailman/`에 설치). `--dev`는 디렉터리를 링크한다(Codex는 링크된 `SKILL.md` 파일을 읽지 않는다). Claude 커맨드와 같은 DB·seen 커서를 공유한다.
@@ -39,5 +39,5 @@ Google Chat API를 사용자 OAuth로 호출해 메시지를 SQLite에 저장하
 - 테스트는 `bun test`. fetch와 auth를 주입하고 실제 Google 호출은 하지 않는다.
 - 조회는 발신자와 관계없이 스페이스별 seen 이후 메시지를 오래된 것부터 최대 200건 출력한다. 첫 조회는 24시간이며 이전 맥락은 스레드당 최근 5건이다.
 - seen은 출력 성공 후 실제 표시한 새 메시지의 최대 생성 시각으로 전진한다. `--since` 기간 조회와 `--only bot|human` 조회는 seen을 바꾸지 않고 DEEP도 기본 조회 모드를 바꾸지 않는다.
-- `mailman send`는 `[🤖 Claude] ` 태그를 붙인다. 카드 전송은 기존 웹훅 curl 절차를 유지한다.
+- `mailman send`는 본문 앞에 `[🤖 <라벨>] ` 태그를 붙인다. 라벨은 `--agent claude|codex` > `MAILMAN_AGENT` > 중립 `AI` 순이다. 설정 최상위 `sendTag: false` 또는 `--no-tag`(설정보다 우선)면 태그 없이 보낸다. `--no-tag`+`--agent`는 인자 오류다. Codex 스킬은 `--agent codex`로 보낸다. 카드 전송은 기존 웹훅 curl 절차를 유지한다.
 - 슬래시 커맨드의 초안 확인/사용자 승인 절차를 유지한다.

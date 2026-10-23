@@ -70,15 +70,15 @@ allowed-tools: Bash(~/.claude/bin/mailman:*)
 
 3. **전송 실행** — 승인되면, 메시지를 가져온 스페이스로 전송:
    ```
-   cat <<'MAILMAN_EOF' | ~/.claude/bin/mailman send [스페이스별칭]
+   cat <<'MAILMAN_EOF' | ~/.claude/bin/mailman send [스페이스별칭] --agent claude
    [초안 내용]
    MAILMAN_EOF
    ```
-   `mailman send`는 **OAuth로 로그인한 사용자 명의**로 `[🤖 Claude] ` 태그를 본문 앞에 자동으로 붙인다. 초안 미리보기에도 이 태그와 전송 대상 스페이스/스레드를 명시한다.
+   `mailman send`는 **OAuth로 로그인한 사용자 명의**로 보내며, 본문 앞에 `[🤖 Claude] `(Codex는 `[🤖 Codex] `) 태그가 붙는다. 사용자가 설정에서 끈 경우(`sendTag: false`) 태그 없이 나간다. 초안 미리보기에도 이 태그와 전송 대상 스페이스/스레드를 명시한다.
 
    원 스레드에 답글을 달려면 출력의 `thread_name`을 사용한다:
    ```bash
-   cat <<'MAILMAN_EOF' | ~/.claude/bin/mailman send [스페이스별칭] --thread spaces/SPACE_ID/threads/THREAD_ID
+   cat <<'MAILMAN_EOF' | ~/.claude/bin/mailman send [스페이스별칭] --agent claude --thread spaces/SPACE_ID/threads/THREAD_ID
    [초안 내용]
    MAILMAN_EOF
    ```
@@ -159,12 +159,12 @@ EOF
 
 3. **전송 실행** — 메시지를 가져온 스페이스로 전송. 원 스레드에 답하려면 위와 같은 `--thread` 옵션을 추가한다:
    ```
-   cat <<'MAILMAN_EOF' | ~/.claude/bin/mailman send [스페이스별칭]
+   cat <<'MAILMAN_EOF' | ~/.claude/bin/mailman send [스페이스별칭] --agent claude
    [초안 내용]
    MAILMAN_EOF
    ```
 
-질문도 사용자 명의 + `[🤖 Claude] ` 태그로 나간다. 태그와 스페이스/스레드를 초안에 표시하고, 전송 본문에는 태그를 중복해서 넣지 않는다. 사용자가 명시적으로 요청한 경우에만 질문을 보낸다. 자의적으로 질문을 생성하지 않는다.
+질문도 사용자 명의로 나가며, 본문 앞에 `[🤖 Claude] `(Codex는 `[🤖 Codex] `) 태그가 붙는다. 사용자가 설정에서 끈 경우(`sendTag: false`) 태그 없이 나간다. 태그와 스페이스/스레드를 초안에 표시하고, 전송 본문에는 태그를 중복해서 넣지 않는다. 사용자가 명시적으로 요청한 경우에만 질문을 보낸다. 자의적으로 질문을 생성하지 않는다.
 
 ## 공통 예외
 

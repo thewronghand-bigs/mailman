@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ChatClient, parseMessage } from "../chat";
-import { SEND_PREFIX } from "../content";
+import { NEUTRAL_SEND_LABEL, sendPrefix } from "../content";
 import { buildMessageBody, sendMessage } from "../send";
 import { json, message, mockFetch, SPACE, THREAD } from "./helpers";
 
@@ -66,10 +66,16 @@ describe("Chat API 목록", () => {
   });
 });
 
+const SEND_PREFIX = sendPrefix("Codex");
+
 describe("전송", () => {
-  test("본문 앞에 공통 태그를 붙이고 줄바꿈을 유지한다", () => {
-    expect(buildMessageBody("첫 줄\n둘째 줄")).toEqual({ text: `${SEND_PREFIX}첫 줄\n둘째 줄` });
-    expect(() => buildMessageBody(" \n\t")).toThrow("빈 메시지");
+  test("태그는 본문 첫 줄 앞에만 붙고 줄바꿈을 유지한다", () => {
+    expect(SEND_PREFIX).toBe("[🤖 Codex] ");
+    expect(sendPrefix(NEUTRAL_SEND_LABEL)).toBe("[🤖 AI] ");
+    expect(buildMessageBody("첫 줄\n둘째 줄\n셋째 줄", SEND_PREFIX)).toEqual({ text: "[🤖 Codex] 첫 줄\n둘째 줄\n셋째 줄" });
+    expect(buildMessageBody("첫 줄\n둘째 줄", "")).toEqual({ text: "첫 줄\n둘째 줄" });
+    expect(() => buildMessageBody(" \n\t", SEND_PREFIX)).toThrow("빈 메시지");
+    expect(() => buildMessageBody(" \n\t", "")).toThrow("빈 메시지");
   });
 
   test("새 메시지는 thread/query 없이 전송하고 생성 이름을 반환한다", async () => {
@@ -79,7 +85,7 @@ describe("전송", () => {
       expect(JSON.parse(String(init.body))).toEqual({ text: `${SEND_PREFIX}확인했습니다` });
       return json({ name: `${SPACE}/messages/created`, thread: { name: THREAD } });
     });
-    expect(await sendMessage(new ChatClient("fixture-access-secret", fetcher), SPACE, "확인했습니다"))
+    expect(await sendMessage(new ChatClient("fixture-access-secret", fetcher), SPACE, "확인했습니다", SEND_PREFIX))
       .toEqual({ name: `${SPACE}/messages/created`, thread: { name: THREAD } });
     expect(calls).toHaveLength(1);
   });
@@ -90,16 +96,16 @@ describe("전송", () => {
       expect(JSON.parse(String(init.body))).toEqual({ text: `${SEND_PREFIX}답글`, thread: { name: THREAD } });
       return json({ name: `${SPACE}/messages/reply`, thread: { name: THREAD } });
     });
-    await sendMessage(new ChatClient("fixture-access-secret", fetcher), SPACE, "답글", THREAD);
+    await sendMessage(new ChatClient("fixture-access-secret", fetcher), SPACE, "답글", SEND_PREFIX, THREAD);
   });
 
   test("빈 본문/다른 스페이스 thread는 호출하지 않고 HTTP 실패는 재시도하지 않는다", async () => {
     const { fetcher, calls } = mockFetch(() => json({ error: { message: "일시 오류" } }, 503));
     const client = new ChatClient("fixture-access-secret", fetcher);
-    await expect(sendMessage(client, SPACE, "")).rejects.toThrow("빈 메시지");
-    await expect(sendMessage(client, SPACE, "답글", "spaces/other/threads/thread")).rejects.toThrow("대상 스페이스");
+    await expect(sendMessage(client, SPACE, "", SEND_PREFIX)).rejects.toThrow("빈 메시지");
+    await expect(sendMessage(client, SPACE, "답글", SEND_PREFIX, "spaces/other/threads/thread")).rejects.toThrow("대상 스페이스");
     expect(calls).toHaveLength(0);
-    await expect(sendMessage(client, SPACE, "답글")).rejects.toThrow("HTTP 503: 일시 오류");
+    await expect(sendMessage(client, SPACE, "답글", SEND_PREFIX)).rejects.toThrow("HTTP 503: 일시 오류");
     expect(calls).toHaveLength(1);
   });
 });

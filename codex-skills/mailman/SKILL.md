@@ -58,12 +58,12 @@ mailman은 작업 폴더 밖인 `~/.claude/{inbox,logs,secrets,mailman}`에 읽�
 사용자가 요청했거나, 이 세션에서 조회한 스펙으로 구현/수정을 마쳤을 때만 전송 초안을 만든다. 질문은 사용자가 명시적으로 보내 달라고 한 경우에만 보낸다.
 
 1. **초안 작성**: 5~10줄 이내로 간결하게 쓴다. 작업 완료 알림이면 변경 요약·변경 파일·남은 이슈를, 질문이면 대상 API와 질문을 적는다. 분석만 했다면 "변경 파일: 없음 (분석만 수행)"으로 쓴다.
-2. **미리보기**: 전송 대상 스페이스와 답글 대상 `thread_name`, 그리고 본문 앞에 `[🤖 Claude] ` 태그가 자동으로 붙어 **로그인한 사용자 명의**로 나간다는 점을 함께 보여 준다.
+2. **미리보기**: 전송 대상 스페이스와 답글 대상 `thread_name`, 그리고 **로그인한 사용자 명의**로 나간다는 점을 함께 보여 준다. 본문 앞에 `[🤖 Codex] ` 태그가 붙는다(`--agent codex`). 사용자가 설정에서 끈 경우(`sendTag: false`) 태그 없이 나간다.
 3. **승인 요청**: "이 내용으로 Google Chat에 전송할까요?"라고 묻는다. 승인 전에는 절대 전송하지 않는다. 수정 요청이 오면 반영해 다시 승인받는다.
 4. **전송**: 승인되면 실행한다. 원 스레드에 답하려면 조회 출력의 `thread_name`을 `--thread`로 넘기고, 새 메시지면 `--thread`를 뺀다.
 
    ```bash
-   cat <<'MAILMAN_EOF' | ~/.claude/bin/mailman send [스페이스별칭] --thread spaces/SPACE_ID/threads/THREAD_ID
+   cat <<'MAILMAN_EOF' | ~/.claude/bin/mailman send [스페이스별칭] --agent codex --thread spaces/SPACE_ID/threads/THREAD_ID
    [승인된 본문]
    MAILMAN_EOF
    ```

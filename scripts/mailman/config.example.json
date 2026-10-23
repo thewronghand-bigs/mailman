@@ -1,5 +1,6 @@
 {
   "defaultSpace": "team",
+  "sendTag": true,
   "spaces": {
     "team": {
       "space": "spaces/SPACE_ID",

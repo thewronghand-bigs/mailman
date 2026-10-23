@@ -10,7 +10,7 @@ Google Chat API를 사용자 OAuth로 호출하는 bun 런타임. 외부 의존�
 mailman auth [--client <client_secret.json>]
 mailman collect [스페이스별칭] [--deep]
 mailman fetch [스페이스별칭] [--since <기간|날짜>] [--only bot|human] [--no-collect] [--deep]
-printf '%s\n' '본문' | mailman send [스페이스별칭] [--thread spaces/.../threads/...]
+printf '%s\n' '본문' | mailman send [스페이스별칭] [--thread spaces/.../threads/...] [--agent claude|codex] [--no-tag]
 mailman --help
 mailman --version
 MAILMAN_BACKFILL_DAYS=60 mailman collect team --deep
@@ -34,7 +34,7 @@ MAILMAN_VERSION=2.1.0 bash ../build.sh   # 버전 덮어쓰기
 
 ## 설정과 경로
 
-설정 예시는 `config.example.json`이다. `defaultSpace`와 `spaces.<별칭>.space`를 작성한다. 선택적인 `webhookUrl`은 카드 전송용이며 v2 텍스트 전송에서는 사용하지 않는다. 이전 설정/DB와 호환하지 않는다.
+설정 예시는 `config.example.json`이다. `defaultSpace`와 `spaces.<별칭>.space`를 작성한다. 선택적인 `webhookUrl`은 카드 전송용이며 v2 텍스트 전송에서는 사용하지 않는다. 최상위 `sendTag`(선택, 기본 `true`)를 `false`로 두면 전송 태그를 붙이지 않는다. 불리언이 아니면 설정 오류(exit 1)다. 이전 설정/DB와 호환하지 않는다.
 
 | 변수 | 기본값/용도 |
 |------|-------------|
@@ -44,6 +44,7 @@ MAILMAN_VERSION=2.1.0 bash ../build.sh   # 버전 덮어쓰기
 | `MAILMAN_TOKEN_FILE` | `~/.claude/secrets/mailman-token.json`, 0600 |
 | `MAILMAN_DEEP` | `1`이면 `--deep`과 같이 최근 30일 창 전체를 재수집 |
 | `MAILMAN_BACKFILL_DAYS` | 최초/DEEP 일수 오버라이드, 기본 7/30일, 1~36500 |
+| `MAILMAN_AGENT` | `claude`/`codex`(대소문자 무시), `--agent`가 없을 때 전송 태그 라벨. 빈 값은 미지정 |
 
 - DB: `$MAILMAN_HOME/inbox/mailman-v2.db` (새 파일은 생성 시 0600, 기존 파일 권한은 유지)
 - 로그: `$MAILMAN_HOME/logs/mailman.log`
@@ -108,7 +109,7 @@ stdout 쓰기가 완료된 뒤 실제 표시한 새 메시지의 최대 생성 �
 
 첨부는 `contentName`, `contentType`, 리소스 `name` 순서로 표시한다. `cardsV2[].card`와 구형 `cards[]`의 제목·섹션·위젯 본문은 마크다운 텍스트로 펼친다. HTML 서식과 엔티티를 변환하며 코드블록 안의 들여쓰기와 원문은 엔티티만 풀어 보존한다. 버튼 링크, 중첩 열, 그리드, 이미지 설명도 표시하고 알 수 없는 위젯은 건너뛴다. 메시지 텍스트가 있으면 먼저 출력하고 그 아래 카드를 붙인다. 표시할 내용이 없는 카드는 `(카드)`로 표시한다.
 
-텍스트 전송은 로그인한 사용자 명의이며 `content.ts`의 `SEND_TAG = "🤖 Claude"`를 공유해 `[🤖 Claude] `를 붙인다. `--thread`는 같은 스페이스의 리소스 이름이어야 하고 `REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD`로 전송한다. 성공 시 message/thread 이름을 출력한다. 실패 시 자동 재시도하지 않는다. 카드는 사용자 OAuth 범위 밖이며 [커맨드 문서](../../commands/mailman.md)의 웹훅 curl 절차를 사용한다.
+텍스트 전송은 로그인한 사용자 명의이며 본문 첫 줄 앞에 `[🤖 <라벨>] `을 한 번 붙인다(`content.ts`의 `sendPrefix`). 결정은 `runtime.ts`의 `resolveSendPrefix`가 한다: `--no-tag`면 태그 없음, 아니면 설정 `sendTag: false`면 태그 없음, 아니면 라벨을 `--agent` > `MAILMAN_AGENT` > 중립 `AI` 순으로 정한다(`claude`→`Claude`, `codex`→`Codex`, 그 밖의 값은 exit 1). `MAILMAN_AGENT`는 태그를 붙이고 `--agent`가 없을 때만 읽는다. `--no-tag`와 `--agent`를 같이 주면 인자 오류다. 태그 없이 보내면 성공 출력에 `태그 없이 전송했습니다 (--no-tag)` 또는 `(설정 sendTag: false)` 한 줄을 붙인다. 값 검증은 모두 refresh 전에 끝난다. `--thread`는 같은 스페이스의 리소스 이름이어야 하고 `REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD`로 전송한다. 성공 시 message/thread 이름을 출력한다. 실패 시 자동 재시도하지 않는다. 카드는 사용자 OAuth 범위 밖이며 [커맨드 문서](../../commands/mailman.md)의 웹훅 curl 절차를 사용한다.
 
 ## 종료 코드
 

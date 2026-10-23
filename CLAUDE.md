@@ -13,11 +13,11 @@ scripts/mailman/
 ├─ errors.ts        # 종료 코드, 인증정보 비공개 처리
 ├─ store.ts         # bun:sqlite 스키마, 메시지 upsert, meta
 ├─ time.ts          # 나노초 보존 RFC3339 정규화
-├─ content.ts       # 전송용 SEND_TAG, SEND_PREFIX
+├─ content.ts       # 전송 태그 라벨(Claude/Codex/중립 AI)과 sendPrefix
 ├─ cards.ts         # 카드 본문과 HTML 서식의 마크다운 렌더링
 ├─ collector.ts     # 스페이스 전체 메시지 증분/백필 수집
 ├─ fetch.ts         # seen 이후 조회 → 스레드/이전 맥락 출력 → seen 저장
-├─ send.ts          # 태그/답글 전송 본문
+├─ send.ts          # 태그 접두사/답글을 붙인 전송 본문
 ├─ cli.ts           # 단일 진입점: mailman <auth|collect|fetch|send>, --help, --version
 ├─ mailman-dev      # 개발 실행기: bun 탐색 후 cli.ts 실행 (install.sh --dev가 링크)
 ├─ config.example.json
@@ -47,6 +47,7 @@ scripts/mailman/
 | `MAILMAN_TOKEN_FILE` | `~/.claude/secrets/mailman-token.json`, refresh token/이메일/허용 스코프, 0600 |
 | `MAILMAN_DEEP` | `1`이면 `--deep`과 같이 수집 커서와 무관하게 최근 30일 백필 (조회 모드는 그대로) |
 | `MAILMAN_BACKFILL_DAYS` | 최초/DEEP 창 일수, 기본 7/30일, 1~36500 |
+| `MAILMAN_AGENT` | `claude`/`codex`(대소문자 무시), `send --agent`가 없을 때 전송 태그 라벨. 빈 값은 미지정, 그 밖의 값은 exit 1(태그가 꺼져 있거나 `--agent`가 있으면 읽지 않음) |
 
 - DB: `$MAILMAN_HOME/inbox/mailman-v2.db` (새 파일 0600)
 - 로그: `$MAILMAN_HOME/logs/mailman.log`
@@ -66,7 +67,7 @@ scripts/mailman/
 - `--only bot|human`은 해당 `sender_type`의 새 메시지만 고르며(이전 맥락은 유형 무관) **seen을 바꾸지 않는다**. 거른 조회로 전진하면 거른 쪽 메시지가 기본 조회에서 영구히 빠진다. `--since`와 조합 가능.
 - `mailman fetch [스페이스] --since 24h|3d|YYYY-MM-DD`는 지정 시점(날짜는 로컬 자정) 이후를 조회하며 seen을 바꾸지 않는다. 기간 단위는 양의 정수 `h`/`d`다. 상한 초과 시 기본 조회는 재실행으로 이어서 보고, 기간 조회는 `--since`를 좁히고, `--only`만 쓴 조회는 `--since`를 지정하거나 좁히라고 안내한다.
 - Claude 커맨드와 Codex 스킬은 같은 DB·seen 커서를 공유한다.
-- 일반 텍스트는 사용자 명의로 `[🤖 Claude] ` 태그를 붙여 전송한다. `--thread`로 원 스레드에 답글을 달 수 있다. 슬래시 커맨드의 전송 승인 절차를 유지한다.
+- 일반 텍스트는 사용자 명의로 본문 앞에 `[🤖 <라벨>] ` 태그를 붙여 전송한다. 라벨은 `--agent claude|codex` > `MAILMAN_AGENT` > 중립 `AI` 순(`runtime.ts`의 `resolveSendPrefix`). 설정 최상위 `sendTag: false`(기본 true, 불리언 아니면 설정 오류) 또는 호출 단위 `--no-tag`(설정보다 우선)면 태그 없이 보내고 성공 출력에 그 사실을 한 줄 표시한다. `--no-tag`+`--agent`는 인자 오류다. 커맨드 문서는 `--agent claude`, Codex 스킬은 `--agent codex`로 보낸다. `--thread`로 원 스레드에 답글을 달 수 있다. 슬래시 커맨드의 전송 승인 절차를 유지한다.
 - 수집 증분 기준은 마지막 `createTime`이며 조회 seen과 별개다. 기존 메시지 수정분과 오래된 맥락은 DEEP 백필로 보완한다. 수집 페이지 상한/실패에서는 메시지/수집 커서를 부분 갱신하지 않는다. DEEP 수집 후에도 기본 조회는 안 읽은 메시지다.
 - `any`를 쓰지 않는다. 외부 응답은 `unknown`에서 좁힌다.
 - 검증은 레포 루트에서 `bun test`. fetch와 auth를 주입하고 실제 Google 호출은 하지 않는다. 빌드는 `bash scripts/build.sh`.

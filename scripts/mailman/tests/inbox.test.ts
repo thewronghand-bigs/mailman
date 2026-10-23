@@ -1,13 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { ChatClient, type ChatMessage } from "../chat";
 import { collectMessages } from "../collector";
-import { SEND_PREFIX } from "../content";
+import { sendPrefix } from "../content";
 import { renderInbox, queryInbox } from "../fetch";
 import { collectionOptions } from "../runtime";
 import { getMeta, openDatabase, setMeta, toRow, upsertRows, type MessageRow } from "../store";
 import { normalizeTime } from "../time";
 import { json, message, mockFetch, SPACE } from "./helpers";
 import apiCard from "./fixtures/api-card.json";
+
+const SEND_PREFIX = sendPrefix("Claude");
 
 const NOW = new Date("2026-10-22T12:00:00Z");
 const SETTINGS = { deep: false, backfillDays: 7, now: NOW };

@@ -87,6 +87,7 @@ https://mail.google.com/chat/u/0/#chat/space/AAAAxxxxxxx  → spaces/AAAAxxxxxxx
 ```json
 {
   "defaultSpace": "team",
+  "sendTag": true,
   "spaces": {
     "team": { "space": "spaces/AAAAxxxxxxx", "webhookUrl": "" },
     "backend": { "space": "spaces/BBBBxxxxxxx" }
@@ -95,6 +96,7 @@ https://mail.google.com/chat/u/0/#chat/space/AAAAxxxxxxx  → spaces/AAAAxxxxxxx
 ```
 
 - `defaultSpace`는 별칭을 생략했을 때 쓰는 스페이스입니다.
+- `sendTag`(선택, 기본 `true`)를 `false`로 두면 `mailman send`가 본문 앞에 `[🤖 AI]`류 태그를 붙이지 않습니다.
 - `webhookUrl`은 선택 사항이며 카드 메시지 전송에만 씁니다. 값이 비밀이므로 이 파일도 공유하지 마세요.
 - 설정 파일 위치는 `MAILMAN_CONFIG` 환경 변수로 바꿀 수 있습니다.
 

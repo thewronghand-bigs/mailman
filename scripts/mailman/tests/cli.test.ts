@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { main, parseArguments } from "../cli";
-import { SEND_PREFIX } from "../content";
-import { getRuntimePaths, loadConfig, resolveSpace, SETUP_GUIDE_URL } from "../runtime";
+import { getRuntimePaths, loadConfig, resolveSendPrefix, resolveSpace, SETUP_GUIDE_URL, type Environment, type RuntimePaths } from "../runtime";
 import { getMeta, openDatabase, setMeta, toRow, upsertRows } from "../store";
 import { cleanupFixtures, fixture, json, message, mockFetch, SPACE, THREAD } from "./helpers";
 
@@ -196,15 +195,16 @@ describe("CLI와 경로", () => {
     const output: string[] = [];
     const success = mockFetch((_url, init, index) => {
       if (index === 0) return json({ access_token: "fixture-access-secret" });
-      expect(JSON.parse(String(init.body))).toEqual({ text: `${SEND_PREFIX}본문`, thread: { name: THREAD } });
+      expect(JSON.parse(String(init.body))).toEqual({ text: "[🤖 AI] 본문", thread: { name: THREAD } });
       return json({ name: `${SPACE}/messages/created`, thread: { name: THREAD } });
     });
-    expect(await main(["send", "tn", "--thread", THREAD], { paths, fetcher: success.fetcher, stdin: () => "본문", stdout: text => output.push(text) })).toBe(0);
+    expect(await main(["send", "tn", "--thread", THREAD], { paths, fetcher: success.fetcher, env: {}, stdin: () => "본문", stdout: text => output.push(text) })).toBe(0);
     expect(output.join("\n")).toContain(`${SPACE}/messages/created`);
+    expect(output.join("\n")).not.toContain("태그 없이");
     expect(output.join("\n")).toContain(THREAD);
     const errors: string[] = [];
     const failure = mockFetch((_url, _init, index) => index === 0 ? json({ access_token: "fixture-access-secret" }) : json({ error: { message: "Permission denied" } }, 403));
-    expect(await main(["send", "tn"], { paths, fetcher: failure.fetcher, stdin: () => "본문", stderr: text => errors.push(text) })).toBe(3);
+    expect(await main(["send", "tn"], { paths, fetcher: failure.fetcher, env: {}, stdin: () => "본문", stderr: text => errors.push(text) })).toBe(3);
     expect(errors.join("\n")).toContain("HTTP 403: Permission denied");
     expect(failure.calls).toHaveLength(2);
   });
@@ -212,8 +212,8 @@ describe("CLI와 경로", () => {
   test("빈 전송 본문과 다른 스페이스의 thread는 refresh 전에 거부한다", async () => {
     const paths = fixture();
     const { fetcher, calls } = mockFetch(() => { throw new Error("호출하면 안 됨"); });
-    expect(await main(["send"], { paths, fetcher, stdin: () => " \n", stderr: () => {} })).toBe(1);
-    expect(await main(["send", "--thread", "spaces/other/threads/thread"], { paths, fetcher, stdin: () => "답글", stderr: () => {} })).toBe(1);
+    expect(await main(["send"], { paths, fetcher, env: {}, stdin: () => " \n", stderr: () => {} })).toBe(1);
+    expect(await main(["send", "--thread", "spaces/other/threads/thread"], { paths, fetcher, env: {}, stdin: () => "답글", stderr: () => {} })).toBe(1);
     expect(calls).toHaveLength(0);
   });
 
@@ -225,6 +225,7 @@ describe("CLI와 경로", () => {
       [[], 1], [["bogus"], 1], [["run"], 1], [["auth", "extra"], 1], [["auth", "--client"], 1], [["collect", "--since", "7d"], 1],
       [["fetch", "tn", "3"], 1], [["fetch", "--all"], 1], [["fetch", "--since"], 1], [["fetch", "--since", "2026-02-30"], 1],
       [["fetch", "--only"], 1], [["fetch", "--only", "robot"], 1], [["fetch", "--deep", "--no-collect"], 1], [["send", "--thread"], 1],
+      [["send", "--agent"], 1], [["send", "--agent", "gpt"], 1], [["send", "--no-tag", "--agent", "claude"], 1], [["send", "--no-tag", "--no-tag"], 1],
     ];
     for (const [args, status] of cases) {
       const result = Bun.spawnSync(["bash", devRunner, ...args], {
@@ -237,5 +238,112 @@ describe("CLI와 경로", () => {
     }
     expect(existsSync(paths.dbPath)).toBe(false);
     expect(existsSync(paths.logFile)).toBe(false);
+  });
+});
+
+describe("전송 태그", () => {
+  function writeConfig(paths: RuntimePaths, extra: Record<string, unknown>): void {
+    writeFileSync(paths.configFile, JSON.stringify({ defaultSpace: "tn", spaces: { tn: { space: SPACE } }, ...extra }));
+  }
+
+  // access token 응답 뒤 전송 요청 본문을 기록한다. 실제 네트워크는 쓰지 않는다.
+  async function send(paths: RuntimePaths, args: string[], env: Environment, text = "본문") {
+    const bodies: string[] = [];
+    const output: string[] = [];
+    const errors: string[] = [];
+    const { fetcher, calls } = mockFetch((_url, init, index) => {
+      if (index === 0) return json({ access_token: "fixture-access-secret" });
+      const body: unknown = JSON.parse(String(init.body));
+      bodies.push(typeof body === "object" && body !== null && "text" in body ? String(body.text) : "");
+      return json({ name: `${SPACE}/messages/created`, thread: { name: THREAD } });
+    });
+    const status = await main(["send", ...args], { paths, fetcher, env, stdin: () => text,
+      stdout: line => output.push(line), stderr: line => errors.push(line) });
+    return { status, body: bodies[0], output: output.join("\n"), errors: errors.join("\n"), calls };
+  }
+
+  test("라벨은 --agent > MAILMAN_AGENT > 중립 AI 순서로 정하고 대소문자를 무시한다", async () => {
+    const paths = fixture();
+    expect((await send(paths, [], {})).body).toBe("[🤖 AI] 본문");
+    expect((await send(paths, [], { MAILMAN_AGENT: "" })).body).toBe("[🤖 AI] 본문");
+    expect((await send(paths, [], { MAILMAN_AGENT: "codex" })).body).toBe("[🤖 Codex] 본문");
+    expect((await send(paths, [], { MAILMAN_AGENT: "CLAUDE" })).body).toBe("[🤖 Claude] 본문");
+    expect((await send(paths, ["--agent", "claude"], { MAILMAN_AGENT: "codex" })).body).toBe("[🤖 Claude] 본문");
+    expect((await send(paths, ["tn", "--agent", "CoDeX"], {})).body).toBe("[🤖 Codex] 본문");
+    // 플래그가 있으면 잘못된 환경변수는 읽지 않는다.
+    expect((await send(paths, ["--agent", "codex"], { MAILMAN_AGENT: "gpt" })).body).toBe("[🤖 Codex] 본문");
+    expect(parseArguments("send", ["--agent", "Claude"]).agent).toBe("claude");
+    expect(parseArguments("send", []).agent).toBeUndefined();
+  });
+
+  test("태그는 여러 줄 본문의 첫 줄 앞에만 한 번 붙는다", async () => {
+    const result = await send(fixture(), ["--agent", "claude"], {}, "첫 줄\n둘째 줄\n\n넷째 줄");
+    expect(result.body).toBe("[🤖 Claude] 첫 줄\n둘째 줄\n\n넷째 줄");
+    expect(result.body?.split("[🤖").length).toBe(2);
+  });
+
+  test("잘못된 --agent·MAILMAN_AGENT 값은 허용값을 안내하고 refresh 전에 exit 1이다", async () => {
+    for (const args of [["--agent", "gpt"], ["--agent"], ["--agent", "--no-tag"], ["--agent", "claude", "--agent", "codex"]]) {
+      expect(() => parseArguments("send", args)).toThrow();
+    }
+    expect(() => parseArguments("send", ["--agent", "gpt"])).toThrow("claude 또는 codex");
+    const paths = fixture();
+    const flag = await send(paths, ["--agent", "gpt"], {});
+    expect(flag.status).toBe(1);
+    expect(flag.errors).toContain("claude 또는 codex");
+    expect(flag.calls).toHaveLength(0);
+    const env = await send(paths, [], { MAILMAN_AGENT: "gpt" });
+    expect(env.status).toBe(1);
+    expect(env.errors).toContain("MAILMAN_AGENT");
+    expect(env.errors).toContain("claude 또는 codex");
+    expect(env.calls).toHaveLength(0);
+  });
+
+  test("설정 sendTag: false면 태그 없이 보내고 성공 출력에 한 줄로 알린다", async () => {
+    const paths = fixture();
+    writeConfig(paths, { sendTag: false });
+    for (const args of [[], ["--agent", "codex"]]) {
+      const result = await send(paths, args, { MAILMAN_AGENT: "claude" });
+      expect(result.status).toBe(0);
+      expect(result.body).toBe("본문");
+      expect(result.output).toContain("✅ 전송 완료\n태그 없이 전송했습니다 (설정 sendTag: false).\nmessage name:");
+    }
+  });
+
+  test("--no-tag는 설정 sendTag: true보다 우선해 이번 전송만 태그를 뺀다", async () => {
+    const paths = fixture();
+    writeConfig(paths, { sendTag: true });
+    const untagged = await send(paths, ["--no-tag"], { MAILMAN_AGENT: "codex" });
+    expect(untagged.body).toBe("본문");
+    expect(untagged.output).toContain("태그 없이 전송했습니다 (--no-tag).");
+    expect((await send(paths, [], { MAILMAN_AGENT: "codex" })).body).toBe("[🤖 Codex] 본문");
+    expect(parseArguments("send", ["--no-tag"]).tag).toBe(false);
+    expect(parseArguments("send", []).tag).toBe(true);
+  });
+
+  test("--no-tag와 --agent를 같이 주면 순서와 무관하게 거절한다", async () => {
+    for (const args of [["--no-tag", "--agent", "claude"], ["--agent", "codex", "--no-tag"]]) {
+      expect(() => parseArguments("send", args)).toThrow("--agent와 --no-tag");
+      const result = await send(fixture(), args, {});
+      expect(result.status).toBe(1);
+      expect(result.calls).toHaveLength(0);
+    }
+    for (const args of [["--agent", "claude"], ["--no-tag"]]) expect(() => parseArguments("fetch", args)).toThrow();
+  });
+
+  test("sendTag는 생략 시 true, 불리언이 아니면 설정 오류다", async () => {
+    const paths = fixture();
+    expect(loadConfig(paths.configFile).sendTag).toBe(true);
+    writeConfig(paths, { sendTag: false });
+    expect(loadConfig(paths.configFile).sendTag).toBe(false);
+    for (const value of ["false", 0, 1, null, {}]) {
+      writeConfig(paths, { sendTag: value });
+      expect(() => loadConfig(paths.configFile)).toThrow("sendTag는 true 또는 false");
+      const result = await send(paths, [], {});
+      expect(result.status).toBe(1);
+      expect(result.calls).toHaveLength(0);
+    }
+    expect(resolveSendPrefix({ tag: true }, { sendTag: true }, {})).toEqual({ prefix: "[🤖 AI] " });
+    expect(resolveSendPrefix({ tag: false }, { sendTag: true }, {})).toEqual({ prefix: "", untaggedReason: "--no-tag" });
   });
 });

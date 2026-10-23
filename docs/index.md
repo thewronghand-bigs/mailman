@@ -46,9 +46,11 @@ curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/inst
 mailman auth [--client <client_secret.json>]
 mailman collect [스페이스] [--deep]
 mailman fetch [스페이스] [--since 24h|3d|YYYY-MM-DD] [--only bot|human] [--no-collect]
-mailman send [스페이스] [--thread spaces/.../threads/...] < 본문.txt
+mailman send [스페이스] [--thread spaces/.../threads/...] [--agent claude|codex | --no-tag] < 본문.txt
 mailman --help | --version
 ```
+
+`send`는 로그인한 사용자 명의로 보내며 본문 앞에 `[🤖 AI] ` 태그를 붙입니다(`--agent claude`면 `[🤖 Claude] `, `--agent codex`면 `[🤖 Codex] `). 태그는 설정 `"sendTag": false`로 끄거나 `--no-tag`로 이번 전송만 뺄 수 있습니다.
 
 ## 문서
 
