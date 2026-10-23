@@ -302,7 +302,7 @@ describe("install.sh 릴리스 모드 (가짜 curl)", () => {
     expect(readdirSync(join(env.claude, "commands")).filter(name => name.includes(".bak."))).toEqual([]);
     expect(readdirSync(join(env.codexHome, "skills/mailman"))).toEqual(["SKILL.md"]);
     expect(env.leftovers()).toEqual([]);
-  });
+  }, 15_000); // 여러 번의 설치·검증 자식 프로세스가 5초를 넘을 수 있다.
 
   test("codex 대상은 커맨드를 설치하지 않고, 잘못된 대상은 아무것도 받지 않는다", () => {
     const env = releaseFixture();

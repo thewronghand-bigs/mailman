@@ -407,6 +407,63 @@ describe("대기 출력과 seen", () => {
 });
 
 describe("CLI 전송 후 대기", () => {
+  test("POST 자체가 실패하면 exit 3이며 전송 완료/exit 5 안내를 하지 않는다", async () => {
+    const paths = fixture();
+    saveToken(paths.tokenFile, { ...loadToken(paths.tokenFile), user_name: SELF });
+    const output: string[] = [], errors: string[] = [];
+    const api = mockFetch(url => url.hostname === "oauth2.googleapis.com" ? json({ access_token: "fixture-access" }) : json({}, 403));
+    expect(await main(["send", "--wait"], { paths, fetcher: api.fetcher, env: {}, stdin: () => "질문", stdout: text => output.push(text), stderr: text => errors.push(text) })).toBe(3);
+    expect(output).toHaveLength(0);
+    expect(errors.join("\n")).not.toContain("전송은 완료됨");
+    expect(errors.join("\n")).not.toContain("재전송하지 말 것");
+    expect(api.calls.filter(call => call.url.hostname === "chat.googleapis.com")).toHaveLength(1);
+  });
+
+  test("send --wait의 POST 401은 refresh/전송 재시도 없이 exit 3이다", async () => {
+    const paths = fixture();
+    saveToken(paths.tokenFile, { ...loadToken(paths.tokenFile), user_name: SELF });
+    const api = mockFetch(url => url.hostname === "oauth2.googleapis.com" ? json({ access_token: "fixture-access" }) : json({}, 401));
+    expect(await main(["send", "--wait"], { paths, fetcher: api.fetcher, env: {}, stdin: () => "질문", stdout: () => {}, stderr: () => {} })).toBe(3);
+    expect(api.calls.filter(call => call.url.hostname === "chat.googleapis.com")).toHaveLength(1);
+    expect(api.calls.filter(call => call.url.hostname === "oauth2.googleapis.com")).toHaveLength(1);
+  });
+
+  test("--from 이메일 DM의 DB 후보가 여럿이면 전송 전에 거절한다", async () => {
+    const db = openDatabase(":memory:");
+    try {
+      save(db, [reply("one", -1000), reply("two", -500, { sender: { name: "users/second-peer", type: "HUMAN" } })]);
+      let lists = 0;
+      await expect(resolveWaitPerson(db, { findDirectMessage: async () => ({ name: SPACE, displayName: "", spaceType: "DIRECT_MESSAGE" }), listMessages: async () => { lists++; return []; } }, "peer@example.test", SELF)).rejects.toThrow("확정할 수 없습니다");
+      expect(lists).toBe(0);
+    } finally { db.close(); }
+  });
+
+  test("--from 이메일 DM의 DB에서 self를 제외해 자신만 있으면 최근 메시지 확인 후 거절한다", async () => {
+    const db = openDatabase(":memory:");
+    try {
+      save(db, [reply("self-only", -1000, { sender: { name: SELF, type: "HUMAN" } })]);
+      let lists = 0;
+      await expect(resolveWaitPerson(db, { findDirectMessage: async () => ({ name: SPACE, displayName: "", spaceType: "DIRECT_MESSAGE" }), listMessages: async () => { lists++; return []; } }, "peer@example.test", SELF)).rejects.toThrow("확정할 수 없습니다");
+      expect(lists).toBe(1);
+    } finally { db.close(); }
+  });
+
+  test("내 이메일/users ID/내 표시명 --from은 단독 wait와 send --wait 모두 거절한다", async () => {
+    const paths = fixture();
+    saveToken(paths.tokenFile, { ...loadToken(paths.tokenFile), user_name: SELF });
+    const db = openDatabase(paths.dbPath);
+    save(db, [reply("self-row", -1000, { sender: { name: SELF, displayName: "내계정", type: "HUMAN" } })]); db.close();
+    for (const args of [["wait"], ["send", "--wait"]]) {
+      for (const from of ["tester@example.test", SELF, "내계정"]) {
+        const errors: string[] = [];
+        const api = mockFetch(url => { expect(url.hostname).toBe("oauth2.googleapis.com"); return json({ access_token: "fixture-access" }); });
+        expect(await main([...args, "--from", from], { paths, fetcher: api.fetcher, env: {}, stdin: () => { throw new Error("본문을 읽으면 안 됨"); }, stdout: () => {}, stderr: text => errors.push(text) })).toBe(1);
+        expect(errors.join("\n")).toContain("내 계정을 지정할 수 없습니다");
+        expect(api.calls).toHaveLength(1);
+      }
+    }
+  });
+
   test("이메일 --from은 기존 DM 발신자를 전송 전에 확정하며 대기 중에는 ID만 비교한다", async () => {
     for (const cached of [false, true]) {
       const paths = fixture();

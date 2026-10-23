@@ -24,9 +24,9 @@ describe("단일 진입점 라우팅", () => {
     expect(io.output.at(-1)).toBe(`mailman ${packageJson.version}`);
     expect(await main(["--help"], io)).toBe(0);
     expect(io.output.at(-1)).toBe(USAGE);
-    for (const command of ["auth", "spaces", "collect", "fetch", "send", "wait"]) expect(USAGE).toContain(`  ${command} `);
+    for (const command of ["auth", "spaces", "collect", "fetch", "send", "wait", "download", "react"]) expect(USAGE).toContain(`  ${command} `);
     expect(USAGE).toContain(SETUP_GUIDE_URL);
-    for (const command of ["auth", "spaces", "collect", "fetch", "send", "wait"] as const) {
+    for (const command of ["auth", "spaces", "collect", "fetch", "send", "wait", "download", "react"] as const) {
       expect(await main([command, "--help"], io)).toBe(0);
       expect(io.output.at(-1)).toBe(HELP[command]);
     }
@@ -66,7 +66,7 @@ describe("단일 진입점 라우팅", () => {
     try { setMeta(db, `lastCreateTime:${SPACE}`, "2026-10-22T11:00:00.000000000Z"); } finally { db.close(); }
     const { fetcher, calls } = mockFetch((_url, _init, index) => index === 0
       ? Response.json({ access_token: "fixture-access-secret" }) : Response.json({ messages: [] }));
-    expect(await main(["collect", "--deep"], { paths, fetcher, stderr: () => {} })).toBe(0);
+    expect(await main(["collect", "--deep"], { paths, fetcher, stdout: () => {}, stderr: () => {} })).toBe(0);
     expect(calls[1]!.url.searchParams.get("filter")).not.toContain("2026-10-22T11:00:00");
   });
 });

@@ -1,6 +1,6 @@
 ---
 description: Google Chat API로 최근 30일 백필 재수집 후 안 읽은 메시지 가져오기
-argument-hint: "[대상] [--dm <사람>] [--since <기간|날짜>] [--only bot|human]  예: team / '개발 팀' / --dm colleague@example.test"
+argument-hint: "[대상] [--dm <사람>] [--since <기간|날짜>] [--only bot|human] [--with-attachments]"
 allowed-tools: Bash(~/.claude/bin/mailman:*)
 ---
 
@@ -10,11 +10,13 @@ allowed-tools: Bash(~/.claude/bin/mailman:*)
 
 ## Claude의 처리 절차
 
-`$MAILMAN_HOME/mailman/local.md`(기본 `~/.claude/mailman/local.md`)가 있으면 먼저 읽고, 그 안의 개인 컨벤션(카드 스타일·말투 등)을 이 문서보다 우선해 따른다. 단 전송 전 사용자 승인과 웹훅 URL 비노출 규칙은 바꾸지 않는다. 없으면 무시한다.
+`$MAILMAN_HOME/mailman/local.md`(기본 `~/.claude/mailman/local.md`)가 있으면 먼저 읽고, 그 안의 개인 컨벤션(카드 스타일·말투 등)을 이 문서보다 우선해 따른다. 리액션 정책과 👀 자동 조건도 바꿀 수 있다. 단 **✅ 리액션 사용자 승인·전송 전 사용자 승인·첨부 파일 제한·웹훅 URL 비노출 규칙은 local.md로도 완화할 수 없다.** 없으면 무시한다.
 
 1. 이전 맥락을 포함한 출력 전체를 읽는다. `[새 메시지]`가 이번 조회 대상이며 `[이전 맥락]`은 새 답글의 맥락이다.
 2. API 스펙·스펙 변경, 사용자에게 온 요청·질문·확인 요청, 일정·배포 공지처럼 작업에 영향 주는 내용만 골라 간결하게 보고한다. 스펙은 지금 작업 티켓과의 관련 여부도 알리고 관련 스펙을 타입 정의와 요청 작성에 활용한다.
 3. 잡담·인사·리액션성 메시지는 보고하지 않는다. 관련 내용이 없으면 출력 머리의 수를 사용해 **`새 메시지 N건, 작업 관련 없음`** 한 줄로 끝낸다. 이전 맥락을 새 메시지 수에 더하지 않는다.
+4. **작업 관련 스펙·요청·핸드오버를 읽고 사용자에게 보고한 뒤** 👀를 승인 없이 자동으로 단다. 단순 조회·잡담에는 달지 않는다. 리액션은 **해당 내용을 보낸 메시지(스펙·요청·핸드오버 그 자체)**의 `message name`에 단다. 사용자 본인 메시지에는 달지 않는다. `thread_name`을 넣지 않는다. `~/.claude/bin/mailman react spaces/SPACE_ID/messages/MESSAGE_ID '👀'`를 쓰고 같은 대상·이모지는 세션에서 한 번만 시도한다. 이미 처리한 메시지에는 중복으로 달지 않으며 409/ALREADY_EXISTS의 `이미 있음`은 성공이다.
+5. 내용을 **실제 반영 완료**한 뒤에만 대상 메시지 name·내용·✅를 보여 주고 사용자 승인 후 `mailman react <메시지 name> '✅'`를 실행한다. 분석만 수행·미완료에는 달지 않는다. 리액션 권한이 없으면(exit 2) `mailman auth` 재실행을 안내하고 작업은 계속한다. 답장 대기 결과에도 이 읽기·리액션 절차를 적용한다.
 
 ## 백필 의미
 
@@ -29,6 +31,8 @@ allowed-tools: Bash(~/.claude/bin/mailman:*)
 - 새 메시지는 오래된 것부터 최대 200건이다. 스레드는 가장 이른 새 메시지순, 내부는 시간순이며 이전 맥락은 스레드당 최근 5건과 생략 건수를 표시한다. 머리의 `thread_name`과 DB 기준 첫 메시지 `name`, 각 메시지의 발신자·BOT/HUMAN 구분을 활용한다.
 - 출력 성공 뒤 실제 보여준 새 메시지의 최대 생성 시각까지 seen을 전진한다. 새 메시지 0건이나 출력 실패에서는 그대로다. 상한 초과 시 기본 조회는 재실행으로 이어서 보고, 기간 조회는 `--since`를 좁힌다. `--only`만 쓴 조회는 seen을 바꾸지 않으므로 `--since`를 지정하거나 좁혀서 나눠 본다.
 - `cardsV2`와 구형 `cards`의 카드 본문도 코드블록과 버튼 링크를 포함한 마크다운 텍스트로 펼쳐진다. 텍스트 다음에 카드를 표시하며, 멘션과 분리된 같은 스레드의 카드 메시지도 포함한다.
+- DM과 단발은 시각·발신자·본문·한 줄 message name의 시간순 간결 목록이며, 답글용 `thread name`도 한 줄로 표시한다. 그룹 실제 스레드(2건 이상)는 기존 머리·이전 맥락을 유지한다. DM은 실제 스레드도 간결 목록이므로 이전 맥락과 생략 건수를 붙이지 않는다. 그룹 스레드도 각 메시지에 한 줄 `message name`을 표시한다. 방 라벨은 `[DM: 이름 또는 users/ID]` 또는 일반 방 표시 이름(없으면 별칭/ID)이다. DM 대상은 알면 이름과 users/ID, 모르면 users/ID 한 번만 표시하고 대기 중 sender 이름도 반영한다.
+- `--with-attachments`는 표시하는 메시지당 텍스트 첨부 최대 3개·각 256KB를 내려받아 파일명·코드블록으로 펼친다. 실패 사유를 표시해 조회를 계속한다. 개별 파일은 출력의 `mailman download <메시지 name> --print`를 사용한다(기본 `$MAILMAN_HOME/mailman/attachments/`, --out으로 변경, 파일 0600·디렉터리 0700, 파일당 50MB). `--out`은 기존 디렉터리 권한을 유지하고 새 디렉터리만 0700으로 만든다. 재사용 기록은 기본 저장 경로에만 두며 `--out`에서는 기록 없이 매번 새 파일로 받는다. Drive 첨부는 링크/파일 ID와 미지원 안내만 표시한다.
 - 수집 실패 시 기존 DB를 출력하므로 오류와 마지막 성공 수집 시각을 확인한다. 최초 인증은 `~/.claude/bin/mailman auth --client <다운로드한 client_secret JSON>`([설정 가이드](https://thewronghand-bigs.github.io/mailman/setup) 참조)이고, 토큰 없음/`invalid_grant`이면 `~/.claude/bin/mailman auth`로 다시 인증한다.
 
 ## 대상 찾기
@@ -43,7 +47,7 @@ allowed-tools: Bash(~/.claude/bin/mailman:*)
 
 1. **초안 미리보기**: 해석된 대상의 **이름·종류·ID를 반드시 표시**하고 답글 대상 `thread_name`을 밝힌다. `send --dry-run`으로 대상·본문을 확인할 수 있다. 사용자 명의로 전송된다는 점을 보여준다. 본문 앞에 `[🤖 Claude] `(Codex는 `[🤖 Codex] `) 태그가 붙는다. 사용자가 설정에서 끈 경우(`sendTag: false`) 태그 없이 나간다.
 2. **사용자 승인**: 초안을 보여주고 "이 내용으로 Google Chat에 전송할까요?"라고 묻는다. 승인 전에는 전송하지 않는다. 수정하면 다시 승인받는다.
-3. **승인 후 전송**:
+3. **승인 후 전송**: 원 스레드에 답글을 달려면 출력의 `thread name`(스레드 머리에서는 `thread_name`) 값을 `--thread`에 쓴다. 값이 `(없음)`이면 스레드 ID를 추측하지 않는다.
 
    ```bash
    cat <<'MAILMAN_EOF' | ~/.claude/bin/mailman send [스페이스별칭] --agent claude --thread spaces/SPACE_ID/threads/THREAD_ID
@@ -62,5 +66,11 @@ allowed-tools: Bash(~/.claude/bin/mailman:*)
 빈 대상·`--dm`·`--from`·`--save`는 인자 오류다. 이름 캐시는 24시간 초과 시 자동 갱신하며 실패하면 경고 후 기존 캐시를 쓴다. DM 미리보기의 해석된 users/ID를 확인한다. `--dry-run --save`는 저장할 예정 안내만 하고 config를 바꾸지 않는다.
 
 카드(`cardsV2`)는 사용자 OAuth 전송 범위 밖이다. [mailman 커맨드 문서](mailman.md)의 웹훅 curl 예시(또는 `local.md`의 카드 컨벤션)를 사용하고, 카드 JSON 초안을 보여준 뒤 사용자 승인 후 전송한다. 설정 파일(`~/.claude/mailman/config.json`)의 `webhookUrl`을 사용하되 값을 출력하지 않는다.
+
+## 파일 첨부 전송 (승인에 포함)
+
+`send --attach <파일>`을 반복해 최대 10개·각 200MB 이하 일반 파일을 보낸다. 심볼릭 링크 파일은 거절한다. 중간 디렉터리 링크는 허용하되 미리보기·성공 출력에는 realpath로 해석한 실제 경로를 표시한다. **사용자 지정 파일만 첨부하고, 지정하지 않은 레포 파일이나 내려받은 첨부를 임의로 추가하지 않는다. .env·키·토큰·자격증명 파일은 첨부하지 않고 사용자에게 경고한다.** 핸드오버 md 작성·전송 요청은 먼저 파일로 쓰고 그 경로를 첨부한다.
+
+`~/.claude/bin/mailman send [대상] --agent claude --attach ./handover.md --dry-run < /dev/null`로 대상·본문과 **첨부 파일 경로·이름·크기**를 모두 미리 보여 주고 전송 승인에 포함한다. 승인 후 같은 명령에서 --dry-run을 빼서 전송한다. 파일 목록/내용이 바뀌면 다시 미리보기와 승인을 받는다. 본문은 stdin이며 비어 있으면 태그만(태그가 꺼져 있으면 첨부만) 보낸다. --thread·--wait도 조합 가능하다. 전부 검증·업로드해야 메시지를 생성하며 업로드 실패/중단은 메시지 미전송과 이전 업로드 무시 안내를 보고한다. 업로드 중단은 exit 5/메시지 전송 여부 불확실이 아니다. 자동 재시도하지 않고 성공 출력의 첨부 이름과 실제 경로도 확인한다. 기존 chat.messages.create만 사용하고 403은 권한 확인·mailman auth 재실행을 안내한다.
 
 `/mailman`과 무관한 작업에는 이 절차를 적용하지 않는다. 분석만 했다면 "변경 파일: 없음 (분석만 수행)"으로 표시한다. 조회 결과가 "[별칭] 새 메시지가 없습니다." 또는 "수집된 데이터가 없습니다. 먼저 mailman auth 및 mailman collect를 실행하세요."인 경우 아무 것도 하지 않는다.

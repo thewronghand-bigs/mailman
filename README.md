@@ -2,7 +2,7 @@
   <img width="261" height="261" alt="mailman" src="https://github.com/user-attachments/assets/b913ae4d-6ab5-4f7a-b655-7acd3865e33d" />
 </p>
 
-<h1 align="center">Mailman v2.1</h1>
+<h1 align="center">Mailman v2.2</h1>
 
 <p align="center"><i>소통을 딸깍하세요.</i></p>
 
@@ -39,10 +39,16 @@ mailman fetch team                                          # 수집 후 새 메
 mailman fetch team --since 2026-10-01                       # 기간 조회 (seen 유지)
 mailman fetch team --only bot                               # 봇 메시지만 (seen 유지)
 mailman fetch team --no-collect                             # 수집 없이 DB만 조회
+mailman fetch team --with-attachments                       # 작은 텍스트 첨부 펼치기
+mailman download spaces/SPACE_ID/messages/MESSAGE_ID --print # 첨부 저장, 작은 텍스트 출력
+mailman react spaces/SPACE_ID/messages/MESSAGE_ID '👀'        # 작업 관련 메시지 읽음
+mailman react spaces/SPACE_ID/messages/MESSAGE_ID '✅'        # 실제 반영 완료, 사용자 승인 후
 printf '%s\n' '확인했습니다.' | mailman send team
 printf '%s\n' '명세 반영 완료했습니다.' | mailman send team --thread spaces/SPACE_ID/threads/THREAD_ID
 printf '%s\n' '확인했습니다.' | mailman send team --agent codex   # [🤖 Codex] 태그
 printf '%s\n' '확인했습니다.' | mailman send team --no-tag        # 이번만 태그 없이
+mailman send team --attach ./handover.md < /dev/null             # 핸드오버 파일 전송
+mailman send team --attach ./handover.md --dry-run < /dev/null   # 경로·이름·크기 미리보기
 printf '%s\n' '확인 부탁드립니다.' | mailman send '개발 팀' --dry-run  # 대상·본문 미리보기
 printf '%s\n' '확인 부탁드립니다.' | mailman send team --wait --timeout 5m
 mailman wait team --from colleague@example.test --quiet 60s --timeout 5m
@@ -94,7 +100,7 @@ curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/inst
 
 ### 개인 컨벤션 (`local.md`)
 
-`$MAILMAN_HOME/mailman/local.md`(기본 `~/.claude/mailman/local.md`)를 만들어 두면 `/mailman`·`/mailman-deep`·`$mailman`이 커맨드 문서보다 먼저 읽고 우선해 따릅니다. 카드 제목·헤더 이미지·섹션 구성·색상, 보고 말투처럼 사람마다 다른 취향을 여기에 적습니다. 레포 문서에는 중립적인 최소 예시만 둡니다. 없으면 무시합니다. 전송 전 사용자 승인과 웹훅 URL 비노출 규칙은 `local.md`로 바꾸지 않습니다.
+`$MAILMAN_HOME/mailman/local.md`(기본 `~/.claude/mailman/local.md`)를 만들어 두면 `/mailman`·`/mailman-deep`·`$mailman`이 커맨드 문서보다 먼저 읽고 우선해 따릅니다. 카드 제목·헤더 이미지·섹션 구성·색상, 보고 말투처럼 사람마다 다른 취향을 여기에 적습니다. 레포 문서에는 중립적인 최소 예시만 둡니다. 없으면 무시합니다. 전송 전 사용자 승인·✅ 리액션 승인·첨부 파일 제한·웹훅 URL 비노출 규칙은 `local.md`로 완화할 수 없습니다.
 
 ## Codex에서 쓰기
 
@@ -140,7 +146,7 @@ network_access = true
 - 모든 발신자 메시지를 원문 그대로 저장합니다. 이름(`name`)이 같으면 `lastUpdateTime` 기준으로 수정 내용을 갱신합니다.
 - 수집 범위는 기본/지정 별칭이나 해당 호출에서 이름·리터럴·`--dm`으로 선택한 방입니다. 자동으로 config에 추가하지 않습니다. 조회도 사람·봇·mailman 전송을 모두 포함하고 본문을 그대로 보여줍니다. Claude는 출력 전체를 읽고 API 스펙, 사용자에게 온 요청·질문, 일정·배포 등 작업에 영향 주는 내용만 요약합니다.
 - 기본 조회는 **mailman이 그 방에서 마지막으로 보여준 이후**의 생성 시각을 가진 메시지입니다. 스페이스별 `seenCreateTime`은 수집 커서 및 Google Chat 읽음 상태와 별개입니다. seen이 없으면 최근 24시간을 보여줍니다.
-- 새 메시지를 오래된 것부터 최대 200건 고릅니다. 스레드는 가장 이른 새 메시지 시각순이며 내부는 시간순입니다. 오래된 스레드의 답글이면 직전의 저장된 메시지 중 최근 5건을 **이전 맥락**으로 붙이고, 생략한 건수를 표시합니다. 출력에는 `thread_name`, DB 기준 첫 메시지 `name`, 각 메시지의 발신자·BOT/HUMAN 구분, 첨부 파일명이 포함됩니다.
+- 새 메시지를 오래된 것부터 최대 200건 고릅니다. DM과 단발 메시지는 시각·발신자·본문·`message name`을 시간순 간결 목록으로 표시합니다. DM은 실제 스레드도 간결 목록이므로 이전 맥락과 생략 건수를 붙이지 않습니다. 그룹 스레드도 각 메시지에 한 줄 `message name`을 표시합니다. 그룹의 실제 스레드(2건 이상)는 가장 이른 새 메시지순으로 묶고 `thread_name`, DB 기준 첫 메시지 `name`, 최근 5건의 **이전 맥락**과 생략 건수를 유지합니다. 출력 머리는 스페이스 표시 이름 또는 `DM: 이름`(이름이 없으면 users/ID)을 사용합니다.
 - 출력 완료 후 실제 표시한 새 메시지의 최대 생성 시각까지 seen을 전진합니다. 같은 시각에 200건 경계가 걸리면 메시지 이름을 보조 커서로 사용해 이어서 보여줍니다. 출력 실패 또는 새 메시지 0건이면 seen은 그대로입니다. 빈 결과는 `[별칭] 새 메시지가 없습니다.`로 표시합니다.
 - `--since 24h`, `--since 3d`, `--since 7d` 또는 `--since YYYY-MM-DD`는 지정 시점 이후를 조회합니다. 기간은 양의 정수 시간/일, 날짜는 실행 환경의 로컬 자정 기준이며 **seen을 바꾸지 않습니다**. 같은 200건·스레드 규칙을 적용하고, 상한을 넘으면 기간을 좁히도록 안내합니다.
 - `cardsV2`와 구형 `cards`의 카드 본문도 제목·섹션·코드블록·버튼 링크 등을 마크다운 텍스트로 펼칩니다. 메시지 텍스트가 함께 있으면 텍스트 다음에 카드를 표시합니다.
@@ -153,13 +159,16 @@ network_access = true
 
 인증은 임의 포트 `127.0.0.1` loopback, PKCE S256, state 검증을 사용합니다. refresh token·이메일·허용 스코프·Google 계정 ID(`user_name: users/<sub>`)를 0600 파일에 저장하며, access token은 매 실행마다 새로 발급받아 메모리에서만 사용합니다. 기존 토큰에 계정 ID가 없으면 첫 대기 때 userinfo로 한 번 보완합니다. id_token 원문은 저장하지 않습니다.
 
-요청 스코프는 다음 다섯 개입니다.
+요청 스코프는 다음 여섯 개입니다. 기존 필수 권한 4개+`openid`는 그대로이며, 리액션 권한은 선택입니다.
 
 - `openid`
 - `https://www.googleapis.com/auth/userinfo.email`
 - `https://www.googleapis.com/auth/chat.spaces.readonly`
 - `https://www.googleapis.com/auth/chat.messages.readonly`
 - `https://www.googleapis.com/auth/chat.messages.create`
+- `https://www.googleapis.com/auth/chat.messages.reactions.create` (선택: 리액션)
+
+기존 사용자는 리액션을 쓰기 전에 `mailman auth`를 다시 실행해야 합니다. 리액션 스코프가 없는 토큰도 기존 조회·전송·대기는 정상 동작하고, `react`만 exit 2로 재인증을 안내합니다.
 
 `mailman send`는 **로그인한 사용자 명의**로 본문 앞에 `[🤖 <라벨>] ` 태그를 붙입니다. 라벨은 `--agent claude|codex`(대소문자 무시)로 `Claude`/`Codex`를 지정하고, 없으면 환경변수 `MAILMAN_AGENT`(같은 값)를, 둘 다 없으면 중립 라벨 `AI`(`[🤖 AI] `)를 씁니다. 그 밖의 값은 오류입니다. `/mailman` 커맨드는 `--agent claude`, Codex `$mailman` 스킬은 `--agent codex`로 보냅니다.
 
@@ -167,7 +176,21 @@ network_access = true
 
 `--thread`를 주면 원 스레드에 답글을 보내며, API가 답글을 만들 수 없으면 새 스레드로 전환합니다. 실패 시 자동 재시도하지 않습니다. 슬래시 커맨드에서는 초안을 보여주고 **사용자 승인 후** 전송합니다.
 
-사용자 인증 전송은 텍스트 전용입니다. `cardsV2`는 [commands/mailman.md](commands/mailman.md)의 기존 웹훅 curl 절차를 계속 사용합니다. [Chat API 전송 규격](https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces.messages/create)을 참고하세요.
+사용자 인증 전송은 텍스트와 파일 첨부를 지원합니다. `cardsV2`는 [commands/mailman.md](commands/mailman.md)의 기존 웹훅 curl 절차를 계속 사용합니다. [Chat API 전송 규격](https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces.messages/create)을 참고하세요.
+
+`send --attach <파일>`을 반복해 최대 10개·각 200MB(200×1024² 바이트) 이하 일반 파일을 보냅니다. 심볼릭 링크는 거절하며 중간 디렉터리 링크를 쓰더라도 미리보기·성공 출력에는 실제 경로(realpath)를 표시합니다. 모든 파일의 존재·종류·크기를 검증한 뒤 basename과 원본 바이트를 순서대로 업로드하고, 전부 성공했을 때만 참조를 넣어 메시지를 생성합니다. 중간 업로드 실패 시 메시지는 보내지 않고 이미 올라간 업로드는 무시해도 된다고 안내합니다. 업로드 POST는 재시도하지 않습니다. 기존 `chat.messages.create` 권한을 사용하며 403이면 권한 확인과 `mailman auth` 재실행을 안내합니다. 추가 스코프는 요청하지 않습니다. [media.upload 규격](https://developers.google.com/workspace/chat/api/reference/rest/v1/media/upload)을 따릅니다.
+
+본문이 있으면 태그+본문, 비어 있고 첨부만 있으면 태그만 보냅니다. 태그를 끄면 텍스트 없이 첨부만 보냅니다. TTY에서는 본문 입력 없이 첨부만 보낼 수 있고 파이프에서는 `< /dev/null`로 빈 본문을 지정할 수 있습니다. `--thread`·`--wait`·`--agent`·`--no-tag`·`--dry-run`과 함께 쓸 수 있으며 기존 옵션 간 배타 규칙은 유지됩니다. `--dry-run`은 업로드하지 않고 파일 경로·이름·크기를 표시하며 성공 출력에는 첨부 이름 목록과 실제 경로가 나옵니다.
+
+Claude/Codex는 사용자가 지정한 파일만 첨부하며 경로·이름·크기를 전송 미리보기에 포함해 승인받습니다. `.env`·키·토큰·자격증명 파일은 첨부하지 않고 경고합니다. 핸드오버 md 작성·전송 요청은 먼저 파일로 쓴 뒤 그 경로를 미리보기에 넣어 승인받고 첨부합니다.
+
+## 첨부와 리액션
+
+첨부 줄의 `mailman download <메시지 name>`으로 업로드 파일을 내려받습니다. 메시지가 DB에 있으면 원본 JSON을 쓰고, 없으면 `messages.get`으로 조회합니다. 기본 위치는 `$MAILMAN_HOME/mailman/attachments/<space id>/<message id>/`이며 `--out <디렉터리>`로 바꿉니다. 기본 디렉터리 0700·파일 0600, 정리한 파일명에 충돌 접미사를 붙이고 기존 파일을 덮어쓰지 않습니다. 기본 경로에서는 같은 다운로드 참조·파일명·저장 크기의 캐시를 재사용합니다. `--out`은 기존 디렉터리 권한을 유지하고 새 디렉터리만 0700으로 만듭니다. `--out`에는 재사용 기록을 남기지 않고 매번 새 파일로 받습니다. 파일당 상한은 50MB이며 30초 무수신 또는 전체 10분 초과 시 중단합니다. 리다이렉트는 HTTPS의 `*.googleapis.com`·`*.googleusercontent.com`·`*.google.com`만 최대 5회 따릅니다. 호스트가 바뀌면 Authorization을 제거하고 허용 범위 밖에는 요청하지 않습니다.
+
+`download --print`는 텍스트 확장자/Content-Type의 256KB 이하 UTF-8 내용만 코드블록으로 출력하고, 바이너리·큰 파일은 경로만 표시합니다. `fetch`, `wait`, `send --wait`의 `--with-attachments`는 표시하는 메시지당 텍스트 첨부 최대 3개를 각 256KB까지 받아 펼칩니다. 실패 사유를 표시하고 조회는 계속합니다. Drive 첨부는 링크/파일 ID와 미지원 안내만 표시합니다. 업로드 다운로드는 기존 읽기 권한을 사용하며 403이면 필요한 스코프 확인과 `mailman auth` 재실행을 안내합니다. 권한을 추측해 추가하지 않습니다. [media.download 규격](https://developers.google.com/workspace/chat/api/reference/rest/v1/media/download)을 따릅니다.
+
+`mailman react <메시지 name> <이모지>`는 👀·✅만 받습니다. Claude/Codex가 작업 관련 스펙·요청·핸드오버를 읽고 보고했을 때 👀를 승인 없이 자동으로 답니다. ✅는 해당 내용을 실제 반영 완료한 뒤 대상과 이모지를 보여 주고 사용자 승인 후 답니다. 잡담에는 달지 않고 같은 메시지·이모지에 중복으로 달지 않습니다. 리액션은 **해당 내용을 보낸 메시지(스펙·요청·핸드오버 그 자체)**의 `message name`에 답니다. 사용자 본인 메시지에는 달지 않습니다. 409/ALREADY_EXISTS는 `이미 있음` 성공으로 처리합니다. `local.md`로 자동 👀 조건은 바꿀 수 있지만 ✅ 승인과 전송 승인은 완화할 수 없습니다.
 
 ## 데이터와 환경변수
 
@@ -179,6 +202,7 @@ network_access = true
 | 설정 (`MAILMAN_CONFIG`) | `$MAILMAN_HOME/mailman/config.json` |
 | 개인 컨벤션 (선택) | `$MAILMAN_HOME/mailman/local.md` |
 | DB | `$MAILMAN_HOME/inbox/mailman-v2.db` |
+| 내려받은 첨부 | `$MAILMAN_HOME/mailman/attachments/` (`--out`으로 변경) |
 | 요약 로그 | `$MAILMAN_HOME/logs/mailman.log` |
 | `MAILMAN_HOME` | `~/.claude` |
 | `MAILMAN_CLIENT_FILE` | `~/.claude/secrets/mailman-oauth.json` |

@@ -79,7 +79,7 @@ describe("공통 대상 해석", () => {
       const dm = await resolveTarget(config, db, async () => ({ listSpaces: async () => [], findDirectMessage: async user => {
         expect(user).toBe("users/peer"); return named("dm", "", "DIRECT_MESSAGE");
       } }), { dm: "users/peer" });
-      expect(targetHeader(dm)).toBe("[대상] DM: users/peer → users/peer (DIRECT_MESSAGE, spaces/dm)");
+      expect(targetHeader(dm)).toBe("[대상] DM: users/peer (DIRECT_MESSAGE, spaces/dm)");
     } finally { db.close(); }
   });
 
@@ -196,6 +196,7 @@ describe("공통 대상 해석", () => {
         const errors: string[] = [];
         expect(await main([command, value], { paths, fetcher: api.fetcher, stderr: text => errors.push(text) })).toBe(1);
         expect(errors.join("\n")).toContain("비어 있지 않은");
+        if (command === "spaces") expect(errors.join("\n")).toContain("검색어는");
       }
       for (const flag of ["--dm", "--from", "--save"]) {
         expect(await main(["send", "--wait", flag, value], { paths, fetcher: api.fetcher, stderr: () => {} })).toBe(1);

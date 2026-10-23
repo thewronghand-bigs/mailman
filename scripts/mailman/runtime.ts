@@ -27,6 +27,7 @@ export function getRuntimePaths(env: Environment = process.env) {
     configFile: expandPath(env.MAILMAN_CONFIG || join(home, "mailman", "config.json")),
     dbPath: join(home, "inbox", "mailman-v2.db"),
     logFile: join(home, "logs", "mailman.log"),
+    attachmentsDir: join(home, "mailman", "attachments"),
     // 인증정보는 MAILMAN_HOME과 별도로 지정한다. 데이터만 옮겨도 재로그인이 필요 없다.
     clientFile: expandPath(env.MAILMAN_CLIENT_FILE || join(defaultHome, "secrets", "mailman-oauth.json")),
     tokenFile: expandPath(env.MAILMAN_TOKEN_FILE || join(defaultHome, "secrets", "mailman-token.json")),
@@ -43,6 +44,12 @@ export function validateThread(space: string, thread: string): void {
   if (!thread.startsWith(`${space}/threads/`) || !/^spaces\/[A-Za-z0-9_-]+\/threads\/[A-Za-z0-9_.-]+$/.test(thread)) {
     throw new MailmanError("--thread는 대상 스페이스의 spaces/.../threads/... 이름이어야 합니다.");
   }
+}
+
+export function parseMessageName(name: string): { space: string; spaceId: string; messageId: string } {
+  const match = /^spaces\/([A-Za-z0-9_-]+)\/messages\/([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/.exec(name);
+  if (!match) throw new MailmanError("메시지 name은 spaces/SPACE_ID/messages/MESSAGE_ID 형식이어야 합니다.");
+  return { space: `spaces/${match[1]}`, spaceId: match[1]!, messageId: match[2]! };
 }
 
 export function loadConfig(configFile: string): MailmanConfig {

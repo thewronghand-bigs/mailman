@@ -12,7 +12,7 @@ export function normalizeName(value: string): string {
 }
 
 export function requireName(value: string, label: string): void {
-  if (!normalizeName(value)) throw new MailmanError(`${label}은 비어 있지 않은 값을 지정하세요.`);
+  if (!normalizeName(value)) throw new MailmanError(`${label}${label === "검색어" ? "는" : "은"} 비어 있지 않은 값을 지정하세요.`);
 }
 
 export const SPACE_CACHE_MAX_AGE_MS = 24 * 60 * 60_000;
@@ -21,9 +21,32 @@ export function formatSpace(space: ChatSpace): string {
   return `${space.displayName || "(표시 이름 없음)"} (${space.spaceType}, ${space.name})`;
 }
 
-export type ResolvedTarget = ChatSpace & { spaceKey: string; dmUser?: string };
+export type ResolvedTarget = ChatSpace & { spaceKey: string; dmUser?: string; dmLabel?: string };
 export function targetHeader(target: ChatSpace): string {
   return `[대상] ${formatSpace(target)}`;
+}
+
+// 대기 중 새로 수집한 sender 표시명도 마지막 출력에 반영한다.
+export function describeTarget(db: Database | undefined, target: ResolvedTarget, self?: string, otherSelf?: string): ResolvedTarget {
+  if (target.spaceType !== "DIRECT_MESSAGE") return target;
+  let user = target.dmUser;
+  if ((!user || user.includes("@")) && db && self) {
+    const peers = db.query<{ name: string }, [string, string, string]>(
+      "SELECT DISTINCT sender_name AS name FROM messages WHERE space=? AND sender_name NOT IN (?,?) AND sender_name LIKE 'users/%' AND (sender_type IS NULL OR sender_type='HUMAN')",
+    ).all(target.name, self, otherSelf ?? self);
+    if (peers.length === 1) user = peers[0]!.name;
+  }
+  const known = user && db ? db.query<{ displayName: string }, [string]>(
+    "SELECT sender_display_name AS displayName FROM messages WHERE sender_name=? AND trim(coalesce(sender_display_name,''))<>'' AND (sender_type IS NULL OR sender_type='HUMAN') ORDER BY create_time DESC, fetched_at DESC LIMIT 1",
+  ).get(user)?.displayName : undefined;
+  const fallback = target.dmLabel ?? target.displayName.replace(/^DM: /, "");
+  const label = known || fallback || user || target.spaceKey;
+  return { ...target, dmUser: user, dmLabel: label, displayName: `DM: ${label}${user && label !== user ? ` → ${user}` : ""}` };
+}
+
+export function inboxLabel(target: ResolvedTarget): string {
+  return target.spaceType === "DIRECT_MESSAGE" ? `DM: ${target.dmLabel ?? target.displayName.replace(/^DM: /, "")}`
+    : target.displayName || target.spaceKey || target.name;
 }
 
 type ClientProvider = () => Promise<Pick<ChatClient, "listSpaces" | "findDirectMessage">>;
@@ -58,13 +81,20 @@ export function resolvePerson(db: Database, value: string): string {
 // 이메일 별칭 자체에는 정식 ID가 없다. 기존 DM의 발신자로 전송 전에 확정한다.
 // 멤버 조회 권한을 추가하지 않고, 대기 중 발신자별 API 조회도 없앤다.
 export async function resolveWaitPerson(db: Database, client: Pick<ChatClient, "findDirectMessage" | "listMessages">,
-  value: string, self: string, now = new Date(), backfillDays = 7): Promise<string> {
+  value: string, self: string, now = new Date(), backfillDays = 7, selfEmail?: string): Promise<string> {
   const person = resolvePerson(db, value);
+  const checked = (id: string): string => {
+    if (id === self || selfEmail && id.toLowerCase() === `users/${selfEmail.toLowerCase()}`) {
+      throw new MailmanError("--from에 내 계정을 지정할 수 없습니다. 상대 사람을 지정하세요.");
+    }
+    return id;
+  };
+  checked(person);
   if (!person.includes("@")) return person;
   const alias = db.query<{ name: string }, [string]>(
     "SELECT DISTINCT sender_name AS name FROM messages WHERE lower(sender_name)=lower(?) AND (sender_type IS NULL OR sender_type='HUMAN')",
   ).all(person);
-  if (alias.length === 1) return alias[0]!.name;
+  if (alias.length === 1) return checked(alias[0]!.name);
   const dm = await client.findDirectMessage(person);
   const peers = new Set(db.query<{ name: string }, [string, string]>(
     "SELECT DISTINCT sender_name AS name FROM messages WHERE space=? AND sender_name<>? AND sender_name LIKE 'users/%' AND (sender_type IS NULL OR sender_type='HUMAN')",
@@ -75,7 +105,7 @@ export async function resolveWaitPerson(db: Database, client: Pick<ChatClient, "
       if (message.sender?.name?.startsWith("users/") && message.sender.name !== self && message.sender.type !== "BOT") peers.add(message.sender.name);
     }
   }
-  if (peers.size === 1) return [...peers][0]!;
+  if (peers.size === 1) return checked([...peers][0]!);
   throw new MailmanError("--from 이메일의 사용자 ID를 확정할 수 없습니다. 기존 DM의 수집 기록/최근 메시지가 필요합니다. 수집된 정확한 사람 이름이나 users/ID로 지정하세요.");
 }
 
@@ -96,7 +126,7 @@ export async function resolveTarget(config: MailmanConfig, db: Database | undefi
     const user = resolvePerson(db, options.dm);
     const space = await (await client()).findDirectMessage(user);
     cacheSpace(db, space, now.toISOString());
-    return { ...space, displayName: `DM: ${options.dm} → ${user}`, spaceKey: options.dm, dmUser: user };
+    return describeTarget(db, { ...space, displayName: space.displayName || options.dm, spaceKey: options.dm, dmUser: user });
   }
   const updated = getMeta(db, "spacesUpdatedAt");
   const expired = updated !== undefined && (!Number.isFinite(Date.parse(updated)) || now.getTime() - Date.parse(updated) > SPACE_CACHE_MAX_AGE_MS);

@@ -10,7 +10,7 @@ export class MailmanError extends Error {
 
 // 대기 중 재시도 여부는 문구 대신 HTTP 상태로 판단한다. status가 없으면 연결 실패다.
 export class RequestError extends MailmanError {
-  constructor(message: string, readonly status?: number) { super(message, 3); }
+  constructor(message: string, readonly status?: number, readonly apiStatus?: string) { super(message, 3); }
 }
 
 export function throwIfAborted(signal?: AbortSignal): void {

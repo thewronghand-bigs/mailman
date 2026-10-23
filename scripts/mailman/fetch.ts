@@ -1,7 +1,8 @@
 // seen 커서 이후의 메시지를 먼저 고른 뒤, 필요한 이전 맥락만 스레드별로 붙인다.
 import type { Database } from "bun:sqlite";
 import { renderCards } from "./cards";
-import { isRecord } from "./errors";
+import { driveDescription } from "./download";
+import { errorMessage, isRecord } from "./errors";
 import { getMeta, setMeta, type MessageRow } from "./store";
 import { normalizeTime } from "./time";
 
@@ -9,13 +10,18 @@ export const MAX_NEW_MESSAGES = 200;
 const MAX_CONTEXT_MESSAGES = 5;
 export type SenderType = "BOT" | "HUMAN";
 // only: 새 메시지를 해당 발신자 유형으로만 거른다. 이전 맥락은 유형과 무관하게 붙인다.
-export type InboxOptions = { spaceKey: string; space: string; since?: string; only?: SenderType; now?: Date };
+export type InboxOptions = {
+  spaceKey: string; space: string; since?: string; only?: SenderType; now?: Date;
+  spaceLabel?: string | (() => string); isDm?: boolean;
+  expandAttachments?: (row: MessageRow) => Promise<string[]>;
+};
 export type InboxThread = {
   name: string | null;
   firstMessageName: string;
   messages: MessageRow[];
   context: MessageRow[];
   omittedContext: number;
+  totalMessages: number;
 };
 export type InboxPage = {
   threads: InboxThread[];
@@ -56,7 +62,7 @@ export function groupMessages(db: Database, space: string, messages: MessageRow[
     const key = threadKey(row);
     let thread = selected.get(key);
     if (!thread) {
-      thread = { name: row.thread_name, firstMessageName: row.name, messages: [], context: [], omittedContext: 0 };
+      thread = { name: row.thread_name, firstMessageName: row.name, messages: [], context: [], omittedContext: 0, totalMessages: 1 };
       selected.set(key, thread);
     }
     thread.messages.push(row);
@@ -71,6 +77,7 @@ export function groupMessages(db: Database, space: string, messages: MessageRow[
   const firstMessage = db.query<{ name: string }, [string, string]>(
     "SELECT name FROM messages WHERE space=? AND thread_name=? ORDER BY create_time ASC, name ASC LIMIT 1",
   );
+  const totalMessages = db.query<{ count: number }, [string, string]>("SELECT COUNT(*) AS count FROM messages WHERE space=? AND thread_name=?");
   for (const thread of selected.values()) {
     if (thread.name === null) continue;
     const firstNew = thread.messages[0]!;
@@ -78,25 +85,33 @@ export function groupMessages(db: Database, space: string, messages: MessageRow[
     thread.context = previousMessages.all(...contextParams, MAX_CONTEXT_MESSAGES).reverse();
     thread.omittedContext = previousCount.get(...contextParams)!.count - thread.context.length;
     thread.firstMessageName = firstMessage.get(space, thread.name)!.name;
+    thread.totalMessages = totalMessages.get(space, thread.name)!.count;
   }
   return { threads: [...selected.values()], newCount: messages.length, remaining: 0, lastNew: messages.at(-1) };
 }
 
-function attachmentNames(json: string): string[] {
+function attachmentLines(json: string, messageName: string): string[] {
   let parsed: unknown;
   try { parsed = JSON.parse(json); } catch { return []; }
   if (!Array.isArray(parsed)) return [];
-  return parsed.filter(isRecord).map(item => [item.contentName, item.contentType, item.name]
+  const items = parsed.filter(isRecord);
+  const names = items.map(item => [item.contentName, item.contentType, item.name]
     .find((value): value is string => typeof value === "string" && value.trim().length > 0) ?? "이름 없음");
+  if (!names.length) return [];
+  const lines = [`(첨부: ${names.join(", ")}) — mailman download ${messageName}`];
+  for (const item of items) {
+    if (!isRecord(item.driveDataRef)) continue;
+    lines.push(driveDescription({ driveDataRef: { driveFileId: typeof item.driveDataRef.driveFileId === "string" ? item.driveDataRef.driveFileId : undefined } })!);
+  }
+  return lines;
 }
 
-function renderMessage(row: MessageRow): string {
+function renderMessage(row: MessageRow, expanded: Map<string, string[]>): string {
   const text = row.text.trim();
-  const attachments = attachmentNames(row.attachments_json);
   const lines: string[] = [];
   if (text) lines.push(text);
   lines.push(...renderCards(row.raw_json));
-  if (attachments.length > 0) lines.push(`(첨부: ${attachments.join(", ")})`);
+  lines.push(...attachmentLines(row.attachments_json, row.name), ...expanded.get(row.name) ?? []);
   return lines.join("\n\n") || "(본문 없음)";
 }
 
@@ -111,15 +126,46 @@ function remainingHint(options: InboxOptions): string {
   return "다시 실행하면 이어서 표시합니다.";
 }
 
-export function renderInbox(db: Database, options: InboxOptions, page = queryInbox(db, options)): string {
+function isThread(options: InboxOptions, thread: InboxThread): boolean {
+  return !options.isDm && thread.name !== null && thread.totalMessages >= 2;
+}
+
+export function displayedMessages(options: InboxOptions, page: InboxPage): MessageRow[] {
+  const rows = page.threads.flatMap(thread => [...(isThread(options, thread) ? thread.context : []), ...thread.messages]);
+  return [...new Map(rows.map(row => [row.name, row])).values()];
+}
+
+export async function renderInboxAsync(db: Database, options: InboxOptions, page: InboxPage): Promise<string> {
+  const expanded = new Map<string, string[]>();
+  if (options.expandAttachments) {
+    for (const row of displayedMessages(options, page)) {
+      try { expanded.set(row.name, await options.expandAttachments(row)); }
+      catch (error: unknown) { expanded.set(row.name, [`첨부 펼치기 실패: ${errorMessage(error)}`]); }
+    }
+  }
+  return renderInbox(db, options, page, expanded);
+}
+
+export function renderInbox(db: Database, options: InboxOptions, page = queryInbox(db, options), expanded = new Map<string, string[]>()): string {
   const output: string[] = [];
+  const label = typeof options.spaceLabel === "function" ? options.spaceLabel() : options.spaceLabel ?? options.spaceKey;
   if (page.newCount === 0) {
-    output.push(`[${options.spaceKey}] 새 메시지가 없습니다.${options.only ? ` (${options.only}만 조회)` : ""}`);
+    output.push(`[${label}] 새 메시지가 없습니다.${options.only ? ` (${options.only}만 조회)` : ""}`);
   } else {
     const filter = options.only ? ` (${options.only}만)` : "";
-    output.push(`[${options.spaceKey}] 새 메시지 ${page.newCount}건${filter}, ${page.threads.length}개 스레드 (오래된 새 메시지부터):\n`);
-    for (const thread of page.threads) {
+    const threadCount = page.threads.filter(thread => isThread(options, thread)).length;
+    output.push(`[${label}] 새 메시지 ${page.newCount}건${filter}${threadCount ? `, ${threadCount}개 스레드` : ""} (오래된 새 메시지부터):\n`);
+    const threads = options.isDm ? page.threads.flatMap(thread => thread.messages.map(row => ({ ...thread, messages: [row] })))
+      .sort((left, right) => left.messages[0]!.create_time < right.messages[0]!.create_time ? -1 : left.messages[0]!.create_time > right.messages[0]!.create_time ? 1 : left.messages[0]!.name < right.messages[0]!.name ? -1 : 1) : page.threads;
+    for (const thread of threads) {
       const firstNew = thread.messages[0]!;
+      if (!isThread(options, thread)) {
+        for (const message of thread.messages) {
+          output.push(`↳ ${message.create_time} — ${author(message)} (${message.sender_type ?? "UNKNOWN"}) [새 메시지]`);
+          output.push(`message name: \`${message.name}\``, `thread name: \`${message.thread_name ?? "(없음)"}\``, renderMessage(message, expanded), "");
+        }
+        continue;
+      }
       output.push(`## ${firstNew.create_time} — ${author(firstNew)}`);
       output.push(`- thread_name: \`${thread.name ?? "(없음)"}\``);
       output.push(`- 첫 메시지 name (DB 기준): \`${thread.firstMessageName}\``);
@@ -127,8 +173,8 @@ export function renderInbox(db: Database, options: InboxOptions, page = queryInb
       if (thread.omittedContext > 0) output.push(`> 이전 맥락 ${thread.omittedContext}건 생략 (최근 ${thread.context.length}건 표시)\n`);
       for (const [label, messages] of [["이전 맥락", thread.context], ["새 메시지", thread.messages]] as const) {
         for (const message of messages) {
-          output.push(`↳ ${message.create_time} — ${author(message)} (${message.sender_type ?? "UNKNOWN"}) [${label}]\n`);
-          output.push(renderMessage(message), "");
+          output.push(`↳ ${message.create_time} — ${author(message)} (${message.sender_type ?? "UNKNOWN"}) [${label}]`);
+          output.push(`message name: \`${message.name}\``, renderMessage(message, expanded), "");
         }
       }
       output.push("\n---\n");
@@ -145,7 +191,7 @@ export function renderInbox(db: Database, options: InboxOptions, page = queryInb
 export async function printInbox(db: Database, options: InboxOptions, write: (text: string) => unknown): Promise<void> {
   const page = queryInbox(db, options);
   // 출력 완료(비동기 쓰기 포함)를 확인한 뒤에만 seen을 저장한다.
-  await write(renderInbox(db, options, page));
+  await write(await renderInboxAsync(db, options, page));
   const last = page.lastNew;
   // 기간 조회와 --only 조회는 seen을 바꾸지 않는다. 거른 조회로 전진하면 거른 쪽 메시지가 기본 조회에서 영구히 빠진다.
   if (options.since !== undefined || options.only !== undefined || !last) return;

@@ -1,6 +1,6 @@
 {
   "name": "claude-mailman",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "private": true,
   "description": "사용자 OAuth와 Google Chat API로 수집·조회·전송하는 로컬 메일함",
   "type": "module",
@@ -11,6 +11,8 @@
     "fetch": "bun cli.ts fetch",
     "send": "bun cli.ts send",
     "wait": "bun cli.ts wait",
+    "download": "bun cli.ts download",
+    "react": "bun cli.ts react",
     "build": "bash ../build.sh",
     "test": "bun test"
   }

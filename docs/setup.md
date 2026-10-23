@@ -70,8 +70,19 @@ mailman이 파일을 검증해 `~/.claude/secrets/mailman-oauth.json`에 0600 �
 
 1. **회사 계정**을 고릅니다.
 2. "Google에서 확인하지 않은 앱" 경고가 나오면 **고급 → (앱 이름)(으)로 이동(안전하지 않음)**을 누릅니다. 본인이 만든 클라이언트이므로 괜찮습니다.
-3. 다섯 가지 권한에 모두 동의합니다.
+3. 요청 권한을 확인하고 동의합니다. 기존 필수 권한 4개+openid에 선택 리액션 권한이 추가됩니다.
 4. 터미널에 `✅ 인증 완료`와 이메일·허용 스코프가 나오면 끝입니다. 브라우저 탭은 닫아도 됩니다.
+
+요청 스코프 목록:
+
+- `openid`
+- `https://www.googleapis.com/auth/userinfo.email`
+- `https://www.googleapis.com/auth/chat.spaces.readonly`
+- `https://www.googleapis.com/auth/chat.messages.readonly`
+- `https://www.googleapis.com/auth/chat.messages.create`
+- `https://www.googleapis.com/auth/chat.messages.reactions.create` (선택)
+
+**v2.2 기존 사용자는 리액션을 사용하려면 `mailman auth`를 다시 실행해 새 권한에 동의해야 합니다.** 기존 5개 필수 스코프만 가진 토큰도 조회·전송·대기는 정상 동작합니다. `react`만 exit 2와 재인증 안내를 냅니다. 업로드 첨부 다운로드는 기존 읽기 스코프를 사용하며, 403이면 필요한 스코프를 확인한 뒤 재인증하세요. 앱은 다른 스코프를 추측해 추가하지 않습니다.
 
 ## 9. 스페이스 등록
 
@@ -121,6 +132,7 @@ Claude Code에서는 `/mailman dev`로 같은 내용을 봅니다. 승인한 질
 | 로그인 화면에서 "액세스 차단됨" | Workspace 관리자의 서드파티 앱 정책 확인 |
 | 7일마다 다시 로그인해야 함 | 6단계에서 앱을 프로덕션으로 게시 |
 | `invalid_grant` (exit 3) | `mailman auth`로 다시 로그인 |
+| 리액션 권한 없음 (exit 2) | `mailman auth` 재실행 후 선택 리액션 권한 동의 |
 | HTTP 403/404 | 스페이스 멤버 여부, Chat API 사용 설정, 4단계 Chat 앱 구성·공개 상태 확인 |
 
 [mailman 홈](index.md) · [개인정보처리방침](privacy.md)
