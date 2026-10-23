@@ -8,6 +8,17 @@ export class MailmanError extends Error {
   }
 }
 
+// 대기 중 재시도 여부는 문구 대신 HTTP 상태로 판단한다. status가 없으면 연결 실패다.
+export class RequestError extends MailmanError {
+  constructor(message: string, readonly status?: number) { super(message, 3); }
+}
+
+export function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw signal.reason instanceof MailmanError ? signal.reason : new MailmanError("대기를 중단했습니다.", signal.reason === "SIGTERM" ? 143 : 130);
+  }
+}
+
 export function registerSecret(value: string): void {
   if (value) secrets.add(value);
 }

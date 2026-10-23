@@ -75,22 +75,26 @@ mailman이 파일을 검증해 `~/.claude/secrets/mailman-oauth.json`에 0600 �
 
 ## 9. 스페이스 등록
 
-Google Chat 웹에서 대상 스페이스를 열면 주소 끝에 스페이스 ID가 있습니다.
+ID를 직접 찾지 않아도 됩니다. 내 방 목록에서 이름을 확인하고 조회합니다.
 
-```text
-https://chat.google.com/room/AAAAxxxxxxx        → spaces/AAAAxxxxxxx
-https://mail.google.com/chat/u/0/#chat/space/AAAAxxxxxxx  → spaces/AAAAxxxxxxx
+```bash
+~/.claude/bin/mailman spaces
+~/.claude/bin/mailman spaces '개발 팀' --refresh
+~/.claude/bin/mailman fetch '개발 팀' --save dev
+~/.claude/bin/mailman fetch --dm colleague@example.test --save colleague
 ```
 
-`~/.claude/mailman/config.json`(설치 때 예시가 만들어집니다)에 별칭과 함께 등록합니다.
+표시 이름은 대소문자·공백을 무시한 정확 일치를 먼저, 없으면 부분 일치를 사용합니다. 후보가 여러 개면 이름·종류·ID 목록을 보고 하나를 선택하세요. `--dm`은 이메일·users/ID 또는 수집된 발신자 이름으로 기존 1:1 DM만 찾습니다. 이름이 없거나 동명이인이면 이메일을 쓰세요. `--save`를 생략하면 설정을 바꾸지 않고 이번 호출에서만 사용합니다.
+
+`--save`는 기존 별칭을 덮어쓰지 않습니다. 설치 예시의 `team` 대신 새 별칭 `dev`를 저장한 뒤, 기본 방으로 쓰려면 `~/.claude/mailman/config.json`의 `defaultSpace`를 `dev`로 바꿉니다. 다른 설정과 웹훅은 보존되며 파일은 0600으로 원자 저장됩니다. 수동 작성 형식은 다음과 같습니다.
 
 ```json
 {
   "defaultSpace": "team",
   "sendTag": true,
   "spaces": {
-    "team": { "space": "spaces/AAAAxxxxxxx", "webhookUrl": "" },
-    "backend": { "space": "spaces/BBBBxxxxxxx" }
+    "team": { "space": "spaces/SPACE_ID", "webhookUrl": "" },
+    "dev": { "space": "spaces/OTHER_SPACE_ID" }
   }
 }
 ```
@@ -103,10 +107,10 @@ https://mail.google.com/chat/u/0/#chat/space/AAAAxxxxxxx  → spaces/AAAAxxxxxxx
 확인:
 
 ```bash
-~/.claude/bin/mailman fetch team
+~/.claude/bin/mailman fetch dev
 ```
 
-Claude Code에서는 `/mailman team`으로 같은 내용을 봅니다.
+Claude Code에서는 `/mailman dev`로 같은 내용을 봅니다. 승인한 질문을 보낼 때 `send --wait`로 답장을 모아 기다릴 수 있습니다(`--timeout` 최대 2h). 답장이 없으면 exit 4입니다. `send --wait`가 exit 5면 전송은 완료됐고 대기만 실패·중단된 것이므로 재전송하지 마세요. 전송 요청 중 중단은 Chat에서 전송 여부를 먼저 확인하세요. 이메일 `--from`은 기존 DM의 수집 기록 또는 최근 메시지로 상대 ID를 전송 전에 확정해야 합니다. DM이 없거나 확정할 수 없으면 수집된 정확한 이름이나 users/ID를 쓰세요. `--dry-run --save`는 저장할 예정만 표시하고 설정을 바꾸지 않습니다.
 
 ## 문제 해결
 

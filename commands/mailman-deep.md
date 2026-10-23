@@ -1,6 +1,6 @@
 ---
 description: Google Chat API로 최근 30일 백필 재수집 후 안 읽은 메시지 가져오기
-argument-hint: "[스페이스] [--since <기간|날짜>] [--only bot|human]  예: team / team --since 7d / team --only human"
+argument-hint: "[대상] [--dm <사람>] [--since <기간|날짜>] [--only bot|human]  예: team / '개발 팀' / --dm colleague@example.test"
 allowed-tools: Bash(~/.claude/bin/mailman:*)
 ---
 
@@ -25,17 +25,23 @@ allowed-tools: Bash(~/.claude/bin/mailman:*)
 - `/mailman-deep [스페이스]`는 재수집 후 mailman이 그 방에서 마지막으로 보여준 seen 이후의 새 메시지를 조회한다. 첫 조회는 최근 24시간이다. seen은 수집 커서나 Google Chat 읽음 상태와 별개이며 스페이스 생략 시 `defaultSpace`를 쓴다.
 - `/mailman-deep [스페이스] --since 7d`는 기간 조회로, `24h`, `3d` 같은 양의 정수 시간/일 또는 `YYYY-MM-DD` 로컬 자정 이후를 표시한다. 기간 조회는 seen을 바꾸지 않는다.
 - `/mailman-deep [스페이스] --only bot|human`은 해당 발신자 유형의 새 메시지만 표시하며 seen을 바꾸지 않는다.
-- 수집 범위는 config에 등록한 방으로만 정한다. 그 방의 모든 메시지를 저장·조회하고 사람·봇·mailman 전송을 모두 포함한다.
+- 수집 범위는 기본/지정 별칭 또는 해당 호출에서 이름·리터럴·`--dm`으로 선택한 방이다. 미등록 방은 이번 호출에서만 사용하며 자동 등록하지 않는다. 그 방의 모든 메시지를 저장·조회하고 사람·봇·mailman 전송을 모두 포함한다.
 - 새 메시지는 오래된 것부터 최대 200건이다. 스레드는 가장 이른 새 메시지순, 내부는 시간순이며 이전 맥락은 스레드당 최근 5건과 생략 건수를 표시한다. 머리의 `thread_name`과 DB 기준 첫 메시지 `name`, 각 메시지의 발신자·BOT/HUMAN 구분을 활용한다.
 - 출력 성공 뒤 실제 보여준 새 메시지의 최대 생성 시각까지 seen을 전진한다. 새 메시지 0건이나 출력 실패에서는 그대로다. 상한 초과 시 기본 조회는 재실행으로 이어서 보고, 기간 조회는 `--since`를 좁힌다. `--only`만 쓴 조회는 seen을 바꾸지 않으므로 `--since`를 지정하거나 좁혀서 나눠 본다.
 - `cardsV2`와 구형 `cards`의 카드 본문도 코드블록과 버튼 링크를 포함한 마크다운 텍스트로 펼쳐진다. 텍스트 다음에 카드를 표시하며, 멘션과 분리된 같은 스레드의 카드 메시지도 포함한다.
 - 수집 실패 시 기존 DB를 출력하므로 오류와 마지막 성공 수집 시각을 확인한다. 최초 인증은 `~/.claude/bin/mailman auth --client <다운로드한 client_secret JSON>`([설정 가이드](https://thewronghand-bigs.github.io/mailman/setup) 참조)이고, 토큰 없음/`invalid_grant`이면 `~/.claude/bin/mailman auth`로 다시 인증한다.
 
+## 대상 찾기
+
+**스페이스 ID를 사용자에게 묻지 않는다.** config 별칭 → `spaces/ID` → `--dm <사람>` → 표시 이름 순으로 해석한다. `~/.claude/bin/mailman spaces '검색어' [--refresh]`로 이름·종류·ID를 찾거나 `--dm colleague@example.test`로 기존 DM을 찾는다. 사람 이름은 수집된 발신자 기록에서 유일해야 하며, 없거나 동명이인이면 이메일로 구분한다. DM을 새로 만들지 않는다.
+
+표시 이름은 대소문자·공백을 무시한 정확 일치 우선, 없으면 부분 일치다. **여러 후보면 목록을 그대로 보여 주고 사용자에게 고르게 한다. 임의 선택 금지.** 위치 인자와 `--dm`은 함께 쓰지 않는다. `--save <새 별칭>`만 별칭을 저장하며 기존 별칭은 덮어쓰지 않는다. 출력의 `[대상] 이름 (종류, ID)`를 확인한다. 종류가 미확인이면 `spaces --refresh`로 보완한다.
+
 ## 작업 완료/질문 전송 (승인 필수)
 
 이 세션의 스펙으로 구현/수정을 완료했을 때만 작업 완료 알림 초안을 작성한다. 도메인, 핵심 변경, 변경 파일, 남은 이슈/질문을 5~10줄 이내로 적는다. 질문은 사용자가 명시적으로 보내 달라고 요청한 경우에만 대상 API와 질문을 짧게 작성한다.
 
-1. **초안 미리보기**: 전송 대상 스페이스와 답글 대상 `thread_name`을 밝힌다. 사용자 명의로 전송된다는 점을 보여준다. 본문 앞에 `[🤖 Claude] `(Codex는 `[🤖 Codex] `) 태그가 붙는다. 사용자가 설정에서 끈 경우(`sendTag: false`) 태그 없이 나간다.
+1. **초안 미리보기**: 해석된 대상의 **이름·종류·ID를 반드시 표시**하고 답글 대상 `thread_name`을 밝힌다. `send --dry-run`으로 대상·본문을 확인할 수 있다. 사용자 명의로 전송된다는 점을 보여준다. 본문 앞에 `[🤖 Claude] `(Codex는 `[🤖 Codex] `) 태그가 붙는다. 사용자가 설정에서 끈 경우(`sendTag: false`) 태그 없이 나간다.
 2. **사용자 승인**: 초안을 보여주고 "이 내용으로 Google Chat에 전송할까요?"라고 묻는다. 승인 전에는 전송하지 않는다. 수정하면 다시 승인받는다.
 3. **승인 후 전송**:
 
@@ -46,6 +52,14 @@ allowed-tools: Bash(~/.claude/bin/mailman:*)
    ```
 
    새 메시지는 `--thread`를 생략한다. 태그는 `mailman send`가 자동으로 붙이므로 본문에 중복해서 넣지 않는다. 답글 실패 시 API가 새 스레드로 전환할 수 있다. 성공 시 message/thread 이름을 확인해 보고하며, 실패 시 재시도하지 않는다.
+
+답장이 필요한 질문은 승인 후 위 전송에 `--wait --quiet 60s --timeout 30m --interval 15s`를 붙이고, 필요하면 `--from <사람>`을 쓴다. **Claude Code의 Bash 도구에서 `run_in_background: true`로 실행**한다(셸 `&`만 붙이지 않는다). 완료 알림이 오면 출력 전체의 `대기 전부터 있던 안 읽은 메시지`와 답장 묶음을 읽고 후속 작업을 이어 간다. 짧은 연속 답장은 quiet가 지날 때까지 모으며, 첫 답장 후 최대 10분/전체 timeout 중 빠른 시점에도 반환한다.
+
+답장 없음은 exit 4이며 질문은 이미 전송됐으므로 다시 보내지 않는다. **`send --wait`가 exit 5면 전송은 완료됨 — 재전송 금지.** 대기 오류·출력 실패·전송 후 SIGINT/SIGTERM도 exit 5다. 전송 요청 중 중단은 전송 여부가 불확실하므로 Chat에서 확인 후 재전송 여부를 판단한다. 단독 `wait`의 SIGINT/SIGTERM은 130/143이다. thread/from 필터·대기 오류·출력 실패·중단에서는 seen을 유지한다. 이미 보낸 질문은 `~/.claude/bin/mailman wait [대상] --timeout 30m`을 같은 방식으로 백그라운드 실행해 새 실행 시각부터 기다릴 수 있다.
+
+`--timeout` 상한은 2시간이다. 연결 오류·5xx·429는 최대 60초 백오프로 재시도하며, 연속 실패 5분이면 받은 답장까지 출력한다. 401은 토큰 갱신 후 1회 재시도한다. `--from`은 전송 전에 확정한다. 이메일은 기존 DM의 수집 기록 또는 최근 메시지에서 상대 ID를 찾는다(기본 7일, `MAILMAN_BACKFILL_DAYS` 적용). DM이 없거나 ID를 확정하지 못하면 전송하지 않으며 수집된 정확한 이름이나 users/ID로 지정한다.
+
+빈 대상·`--dm`·`--from`·`--save`는 인자 오류다. 이름 캐시는 24시간 초과 시 자동 갱신하며 실패하면 경고 후 기존 캐시를 쓴다. DM 미리보기의 해석된 users/ID를 확인한다. `--dry-run --save`는 저장할 예정 안내만 하고 config를 바꾸지 않는다.
 
 카드(`cardsV2`)는 사용자 OAuth 전송 범위 밖이다. [mailman 커맨드 문서](mailman.md)의 웹훅 curl 예시(또는 `local.md`의 카드 컨벤션)를 사용하고, 카드 JSON 초안을 보여준 뒤 사용자 승인 후 전송한다. 설정 파일(`~/.claude/mailman/config.json`)의 `webhookUrl`을 사용하되 값을 출력하지 않는다.
 

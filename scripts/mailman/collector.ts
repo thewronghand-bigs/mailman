@@ -48,3 +48,7 @@ export function logCollectionFailure(logFile: string, space: string, error: unkn
   const message = errorMessage(error).replace(/[\r\n\x00-\x1f\x7f]+/g, " ");
   appendLog(logFile, `[mailman] ${new Date().toISOString()} space=${space} 수집 실패: ${message}`);
 }
+
+export function logWaitWarning(logFile: string, space: string, message: string): void {
+  appendLog(logFile, `[mailman] ${new Date().toISOString()} space=${space} ${message.replace(/[\r\n\x00-\x1f\x7f]+/g, " ")}`);
+}

@@ -60,11 +60,11 @@ Codex의 `$mailman` 스킬은 Claude와 같은 실행 파일·DB·seen 커서를
 3. 다섯 권한(`openid`, 이메일, 스페이스 읽기, 메시지 읽기, 메시지 생성)에 모두 동의합니다.
 4. 터미널에 인증 완료, 이메일, 허용 스코프가 출력되는지 확인합니다.
 
-인증 대기 시간은 5분입니다. 성공하면 refresh token·이메일·허용 스코프를 토큰 파일에 0600으로 저장합니다. access token은 저장하지 않습니다. 재인증은 `--client` 없이 `mailman auth`만 실행합니다. 클라이언트 파일이 없으면 설정 가이드를 안내하고 exit 2로 끝납니다.
+인증 대기 시간은 5분입니다. 성공하면 refresh token·이메일·허용 스코프·Google 계정 ID(`users/<sub>`)를 토큰 파일에 0600으로 저장합니다. access token과 id_token 원문은 저장하지 않습니다. 기존 토큰의 계정 ID는 첫 답장 대기 때 userinfo로 한 번 보완합니다. 재인증은 `--client` 없이 `mailman auth`만 실행합니다. 클라이언트 파일이 없으면 설정 가이드를 안내하고 exit 2로 끝납니다.
 
 ## 설정 파일
 
-`~/.claude/mailman/config.json`의 `defaultSpace`, `spaces.<별칭>.space`를 편집합니다. `space`는 `spaces/SPACE_ID` 형식이며 Chat 웹 URL 끝의 ID를 씁니다. 카드 전송용 `webhookUrl`은 선택 사항입니다. 이전 버전의 `scripts/mailman/config.json` 위치와 `url`, `bots`, `defaultBot` 설정은 사용하지 않습니다.
+`mailman spaces`로 방 이름을 확인하고 `mailman fetch '표시 이름' --save <새 별칭>`으로 등록할 수 있습니다. `--dm colleague@example.test`로 기존 DM을 직접 찾을 수도 있습니다. 여러 후보면 목록에서 하나를 선택하며 ID를 직접 찾을 필요가 없습니다. `--save`는 기존 별칭을 덮어쓰지 않습니다. 기본 방은 `~/.claude/mailman/config.json`의 `defaultSpace`를 새 별칭으로 편집해 바꿉니다. 카드 전송용 `webhookUrl`은 선택 사항입니다. 이전 버전의 `scripts/mailman/config.json` 위치와 `url`, `bots`, `defaultBot` 설정은 사용하지 않습니다.
 
 경로를 바꾸려면:
 

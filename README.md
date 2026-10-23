@@ -2,7 +2,7 @@
   <img width="261" height="261" alt="mailman" src="https://github.com/user-attachments/assets/b913ae4d-6ab5-4f7a-b655-7acd3865e33d" />
 </p>
 
-<h1 align="center">Mailman v2</h1>
+<h1 align="center">Mailman v2.1</h1>
 
 <p align="center"><i>소통을 딸깍하세요.</i></p>
 
@@ -29,6 +29,10 @@ echo 'export PATH="$HOME/.claude/bin:$PATH"' >> ~/.zshrc   # PATH 추가 (zsh)
 ```bash
 mailman auth --client ~/Downloads/client_secret_XXXX.json   # 최초 로그인 (클라이언트 등록)
 mailman auth                                                # 재로그인
+mailman spaces                                             # 내가 속한 스페이스 이름·종류·ID (캐시)
+mailman spaces '개발 팀' --refresh                          # 이름 검색, 목록 갱신
+mailman fetch '개발 팀' --save dev                          # 이름으로 조회하고 별칭 저장
+mailman fetch --dm colleague@example.test                   # 기존 1:1 DM 조회
 mailman collect team                                        # 수집만
 mailman collect team --deep                                 # 최근 30일 백필 수집
 mailman fetch team                                          # 수집 후 새 메시지 조회
@@ -39,11 +43,26 @@ printf '%s\n' '확인했습니다.' | mailman send team
 printf '%s\n' '명세 반영 완료했습니다.' | mailman send team --thread spaces/SPACE_ID/threads/THREAD_ID
 printf '%s\n' '확인했습니다.' | mailman send team --agent codex   # [🤖 Codex] 태그
 printf '%s\n' '확인했습니다.' | mailman send team --no-tag        # 이번만 태그 없이
+printf '%s\n' '확인 부탁드립니다.' | mailman send '개발 팀' --dry-run  # 대상·본문 미리보기
+printf '%s\n' '확인 부탁드립니다.' | mailman send team --wait --timeout 5m
+mailman wait team --from colleague@example.test --quiet 60s --timeout 5m
 mailman --help
 mailman --version
 ```
 
 한 번에 새 메시지를 최대 **200건** 보여줍니다. 첫 조회는 최근 24시간이며, 기본 조회에서 남은 메시지는 다시 실행하면 이어서 보여줍니다.
+
+대상은 **config 별칭 → `spaces/ID` → `--dm <사람>` → 스페이스 표시 이름** 순서로 해석합니다. 표시 이름은 대소문자·공백을 무시한 정확 일치를 먼저 찾고, 없으면 부분 일치합니다. 후보가 여러 개면 목록을 보여 주고 exit 1로 끝납니다. 이름을 못 찾으면 목록을 한 번 갱신합니다. 스페이스 ID를 직접 찾을 필요가 없습니다. `--dm`은 `users/ID`, 이메일 또는 수집된 발신자 이름을 받으며, 동명이인은 이메일로 구분합니다. 기존 DM만 찾고 새 DM을 만들지 않습니다. 위치 인자와 `--dm`은 함께 쓸 수 없습니다.
+
+config에 없는 방도 해당 호출에서 사용할 수 있습니다. `--save <새 별칭>`을 붙일 때만 별칭을 저장하며, 기존 별칭은 덮어쓰지 않습니다. 출력 첫 줄의 `[대상] 이름 (종류, spaces/...)`를 확인하세요. 별칭·리터럴의 표시 정보가 캐시에 없으면 입력 이름과 `SPACE_TYPE_UNSPECIFIED`를 표시합니다. `mailman spaces --refresh`로 표시 정보를 채울 수 있습니다.
+
+`wait`는 실행 시각부터, `send --wait`는 방금 보낸 메시지의 생성 시각부터 내 메시지를 제외한 답장을 기다립니다. 기본값은 `--quiet 60s --timeout 30m --interval 15s`입니다. 짧은 답장이 이어지면 quiet를 다시 세고, 조용해졌을 때 한 묶음으로 보여 줍니다. 첫 답장 후 최대 10분과 전체 timeout 중 빠른 시점에도 묶음을 반환합니다. `--thread`·`--from`으로 범위를 좁힐 수 있습니다. 대기 전 안 읽은 다른 사람 메시지는 먼저 표시합니다. 이 과거 메시지와 답장 묶음은 누락 없이 모두 표시하므로 일반 fetch의 200건 상한을 적용하지 않습니다.
+
+대기 출력이 성공하면 실제 보여 준 메시지까지 seen을 전진합니다. `--thread`·`--from`, 대기 오류·출력 실패·중단에서는 seen을 유지합니다. 답장이 없으면 `답장 없음`과 **exit 4**입니다. **`send --wait`가 exit 5면 전송은 완료됨 — 재전송 금지**입니다. 전송 완료 정보는 먼저 출력하며 이후 대기 오류·출력 실패·시그널은 exit 5입니다. 전송 요청 중 중단은 전송 여부가 불확실하므로 Chat에서 확인 후 재전송 여부를 판단합니다. 단독 `wait`의 Ctrl-C/SIGTERM은 **130/143**입니다. Claude Code는 승인 후 `send --wait`를 Bash `run_in_background`로 실행하고 완료 알림에서 답장 묶음을 읽습니다. Codex는 완료 알림이 없으므로 `--timeout 2m`처럼 짧게 잡아 블로킹 실행합니다.
+
+`--timeout` 상한은 2시간입니다. 연결 오류·5xx·429는 최대 60초 백오프로 재시도하고, 연속 실패 5분이면 받은 답장을 출력하고 오류로 종료합니다. 401은 토큰 갱신 후 1회 재시도합니다. `--from`은 전송 전에 확정합니다. 이메일은 이미 수집된 이메일 발신자 별칭 또는 기존 DM의 상대 발신자로 ID를 찾습니다. DM 기록이 없으면 최근 메시지를 조회합니다(기본 7일, `MAILMAN_BACKFILL_DAYS` 적용). DM이 없거나 ID를 확정하지 못하면 전송하지 않으므로 수집된 정확한 이름이나 users/ID로 지정하세요.
+
+빈 문자열·공백 대상/사람/저장 별칭은 exit 1이며, 대상 생략만 기본 방을 사용합니다. 이름 해석 전 24시간보다 오래된 목록 캐시는 자동 갱신하고, 오프라인이면 경고 후 기존 캐시를 사용합니다. DM 출력에는 해석된 users/ID도 표시합니다. `--dry-run --save`는 저장할 예정만 표시하고 config를 바꾸지 않습니다.
 
 ## 설치와 설정
 
@@ -56,7 +75,7 @@ curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/inst
 1. 설치 스크립트가 최신 릴리스의 `mailman-darwin-<arch>`를 `~/.claude/bin/mailman`에, `/mailman`·`/mailman-deep` 커맨드를 `~/.claude/commands/`에 설치하고 설정 예시를 `~/.claude/mailman/config.json`에 만듭니다. 필요한 파일을 모두 받아 검증한 뒤 한꺼번에 설치하므로, 다운로드가 하나라도 실패하면 기존 설치는 그대로입니다. 실행 파일은 직전 1개만 `mailman.bak`으로, 커맨드·스킬 문서는 `.bak.<타임스탬프>`로 백업합니다. Codex 스킬도 설치하려면 `MAILMAN_TARGET=all`(또는 `codex`)을 붙입니다.
 2. **OAuth 클라이언트는 사용자마다 직접 만듭니다.** [설정 가이드](https://thewronghand-bigs.github.io/mailman/setup)를 따라 본인 GCP 프로젝트에 데스크톱 앱 OAuth 클라이언트를 만들고 JSON을 받습니다. 실행 파일·레포·릴리스에는 client id/secret이 없습니다.
 3. `~/.claude/bin/mailman auth --client <받은 JSON>`으로 로그인합니다. JSON은 검증 후 `~/.claude/secrets/mailman-oauth.json`에 0600으로 복사됩니다.
-4. 설정 파일에 스페이스를 등록합니다.
+4. `mailman spaces`로 이름을 확인하고 `mailman fetch '표시 이름' --save <새 별칭>`으로 조회·등록합니다. 이름이나 DM을 직접 쓰면 등록을 생략할 수 있습니다. 기본 별칭은 설정의 `defaultSpace`로 정합니다.
 
 ```json
 {
@@ -71,7 +90,7 @@ curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/inst
 }
 ```
 
-`space`는 Chat API의 리소스 이름(`spaces/` + Chat 웹 URL 끝의 ID)입니다. 별칭을 추가하면 여러 스페이스를 사용할 수 있습니다. `webhookUrl`은 선택 사항이며 카드 전송에만 씁니다. `sendTag`도 선택 사항이며(기본 `true`) `false`로 두면 `mailman send`가 전송 태그를 붙이지 않습니다([인증과 전송](#인증과-전송) 참고). 자세한 내용은 [INSTALL.md](INSTALL.md)를 참고하세요.
+`space`는 Chat API의 리소스 이름입니다. 위 JSON은 수동 설정 형식이며 `--save`를 쓰면 이 필드가 자동으로 채워집니다. 설치 예시의 `team`을 교체하려면 설정 파일을 직접 편집합니다(`--save`는 기존 별칭 교체를 거절). `webhookUrl`은 선택 사항이며 카드 전송에만 씁니다. `sendTag`도 선택 사항이며(기본 `true`) `false`로 두면 `mailman send`가 전송 태그를 붙이지 않습니다([인증과 전송](#인증과-전송) 참고). 자세한 내용은 [INSTALL.md](INSTALL.md)를 참고하세요.
 
 ### 개인 컨벤션 (`local.md`)
 
@@ -119,7 +138,7 @@ network_access = true
 - 최초 수집은 최근 7일입니다. 이후에는 스페이스별 마지막 `createTime` 이후를 증분 수집합니다.
 - `/mailman-deep`은 수집 커서와 관계없이 최근 30일을 다시 받습니다. 구멍을 메우는 재수집이며, 그 뒤 조회는 기본 모드(안 읽은 메시지)를 유지합니다. `MAILMAN_BACKFILL_DAYS`로 최초/백필 창을 바꿀 수 있습니다.
 - 모든 발신자 메시지를 원문 그대로 저장합니다. 이름(`name`)이 같으면 `lastUpdateTime` 기준으로 수정 내용을 갱신합니다.
-- 수집 범위는 **config에 등록한 방**으로 정합니다. 조회도 사람·봇·mailman 전송을 모두 포함하고 본문을 그대로 보여줍니다. Claude는 출력 전체를 읽고 API 스펙, 사용자에게 온 요청·질문, 일정·배포 등 작업에 영향 주는 내용만 요약합니다.
+- 수집 범위는 기본/지정 별칭이나 해당 호출에서 이름·리터럴·`--dm`으로 선택한 방입니다. 자동으로 config에 추가하지 않습니다. 조회도 사람·봇·mailman 전송을 모두 포함하고 본문을 그대로 보여줍니다. Claude는 출력 전체를 읽고 API 스펙, 사용자에게 온 요청·질문, 일정·배포 등 작업에 영향 주는 내용만 요약합니다.
 - 기본 조회는 **mailman이 그 방에서 마지막으로 보여준 이후**의 생성 시각을 가진 메시지입니다. 스페이스별 `seenCreateTime`은 수집 커서 및 Google Chat 읽음 상태와 별개입니다. seen이 없으면 최근 24시간을 보여줍니다.
 - 새 메시지를 오래된 것부터 최대 200건 고릅니다. 스레드는 가장 이른 새 메시지 시각순이며 내부는 시간순입니다. 오래된 스레드의 답글이면 직전의 저장된 메시지 중 최근 5건을 **이전 맥락**으로 붙이고, 생략한 건수를 표시합니다. 출력에는 `thread_name`, DB 기준 첫 메시지 `name`, 각 메시지의 발신자·BOT/HUMAN 구분, 첨부 파일명이 포함됩니다.
 - 출력 완료 후 실제 표시한 새 메시지의 최대 생성 시각까지 seen을 전진합니다. 같은 시각에 200건 경계가 걸리면 메시지 이름을 보조 커서로 사용해 이어서 보여줍니다. 출력 실패 또는 새 메시지 0건이면 seen은 그대로입니다. 빈 결과는 `[별칭] 새 메시지가 없습니다.`로 표시합니다.
@@ -132,7 +151,7 @@ network_access = true
 
 ## 인증과 전송
 
-인증은 임의 포트 `127.0.0.1` loopback, PKCE S256, state 검증을 사용합니다. refresh token·이메일·허용 스코프만 0600 파일에 저장하며, access token은 매 실행마다 새로 발급받아 메모리에서만 사용합니다.
+인증은 임의 포트 `127.0.0.1` loopback, PKCE S256, state 검증을 사용합니다. refresh token·이메일·허용 스코프·Google 계정 ID(`user_name: users/<sub>`)를 0600 파일에 저장하며, access token은 매 실행마다 새로 발급받아 메모리에서만 사용합니다. 기존 토큰에 계정 ID가 없으면 첫 대기 때 userinfo로 한 번 보완합니다. id_token 원문은 저장하지 않습니다.
 
 요청 스코프는 다음 다섯 개입니다.
 

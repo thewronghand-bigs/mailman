@@ -2,11 +2,12 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { isRecord, MailmanError, registerSecret } from "./errors";
+import { chmodSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { isRecord, MailmanError, RequestError, registerSecret } from "./errors";
 import { requestJson, type Fetch } from "./http";
 import type { RuntimePaths } from "./runtime";
+import { writePrivateFile } from "./private-file";
 
 export const SCOPES = [
   "openid",
@@ -17,7 +18,7 @@ export const SCOPES = [
 ] as const;
 
 export type OAuthClient = { client_id: string; client_secret: string; auth_uri: string; token_uri: string };
-export type SavedToken = { refresh_token: string; email: string; scopes: string[] };
+export type SavedToken = { refresh_token: string; email: string; scopes: string[]; user_name?: string };
 export type Pkce = { verifier: string; challenge: string; state: string };
 
 export function createPkce(): Pkce {
@@ -111,11 +112,13 @@ export function loadToken(path: string): SavedToken {
   }
   if (!isRecord(value) || typeof value.refresh_token !== "string" || !value.refresh_token ||
       typeof value.email !== "string" || !/^[^@\s]+@[^@\s]+$/.test(value.email) ||
-      !Array.isArray(value.scopes) || !value.scopes.every((scope: unknown) => typeof scope === "string")) {
+      !Array.isArray(value.scopes) || !value.scopes.every((scope: unknown) => typeof scope === "string") ||
+      (value.user_name !== undefined && (typeof value.user_name !== "string" || !/^users\/[A-Za-z0-9_-]+$/.test(value.user_name)))) {
     throw new MailmanError("토큰 파일 형식이 올바르지 않습니다. 다시 mailman auth를 실행하세요.", 3);
   }
   registerSecret(value.refresh_token);
-  return { refresh_token: value.refresh_token, email: value.email, scopes: checkScopes(value.scopes) };
+  return { refresh_token: value.refresh_token, email: value.email, scopes: checkScopes(value.scopes),
+    ...(typeof value.user_name === "string" ? { user_name: value.user_name } : {}) };
 }
 
 // 검증한 클라이언트 JSON을 0600으로 복사한다. 원본 내용을 그대로 옮기며 출력하지 않는다.
@@ -129,30 +132,10 @@ export function installClient(source: string, destination: string): void {
     "OAuth 클라이언트 파일을 저장할 수 없습니다. MAILMAN_CLIENT_FILE의 디렉터리 권한을 확인하세요.");
 }
 
-// 0600 임시 파일을 만든 뒤 원자적으로 교체한다. 실패 메시지에는 파일 내용을 넣지 않는다.
-function writePrivateFile(path: string, content: string | Buffer, prefix: string, failure: string): void {
-  const temporary = join(dirname(path), `${prefix}${randomBytes(12).toString("hex")}`);
-  let fd: number | undefined;
-  try {
-    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-    fd = openSync(temporary, "wx", 0o600);
-    writeFileSync(fd, content);
-    closeSync(fd);
-    fd = undefined;
-    chmodSync(temporary, 0o600);
-    renameSync(temporary, path);
-  } catch {
-    throw new MailmanError(failure);
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-    try { unlinkSync(temporary); } catch { /* 이동 완료 또는 임시 파일 없음 */ }
-  }
-}
-
 export function saveToken(path: string, token: SavedToken): void {
   registerSecret(token.refresh_token);
   // 객체를 명시해서 access_token/id_token이 파일에 섞여 들어갈 수 없게 한다.
-  writePrivateFile(path, JSON.stringify({ refresh_token: token.refresh_token, email: token.email, scopes: token.scopes }, null, 2) + "\n",
+  writePrivateFile(path, JSON.stringify({ refresh_token: token.refresh_token, email: token.email, scopes: token.scopes, user_name: token.user_name }, null, 2) + "\n",
     ".mailman-token-", "토큰 파일을 저장할 수 없습니다. MAILMAN_TOKEN_FILE의 디렉터리 권한을 확인하세요.");
 }
 
@@ -164,12 +147,13 @@ async function tokenRequest(client: OAuthClient, params: Record<string, string>,
   });
   if (isRecord(body) && typeof body.access_token === "string") registerSecret(body.access_token);
   if (isRecord(body) && typeof body.refresh_token === "string") registerSecret(body.refresh_token);
+  if (isRecord(body) && typeof body.id_token === "string") registerSecret(body.id_token);
   if (isRecord(body) && body.error === "invalid_grant") {
     throw new MailmanError("OAuth 인증이 만료되었거나 취소되었습니다. 다시 mailman auth를 실행하세요.", 3);
   }
   if (!response.ok || !isRecord(body) || typeof body.access_token !== "string" || !body.access_token) {
     // error_description에는 요청의 비밀값이 섞일 수 있어서 그대로 출력하지 않는다.
-    throw new MailmanError(`OAuth 토큰 발급 실패 (HTTP ${response.status}). OAuth 설정을 확인하거나 다시 mailman auth를 실행하세요.`, 3);
+    throw new RequestError(`OAuth 토큰 발급 실패 (HTTP ${response.status}). OAuth 설정을 확인하거나 다시 mailman auth를 실행하세요.`, response.status);
   }
   return body;
 }
@@ -189,7 +173,40 @@ export async function exchangeCode(client: OAuthClient, code: string, redirectUr
   if (!response.ok || !isRecord(user) || typeof user.email !== "string" || !/^[^@\s]+@[^@\s]+$/.test(user.email) || user.email_verified !== true) {
     throw new MailmanError(`Google 계정 이메일을 확인할 수 없습니다 (HTTP ${response.status}).`, 3);
   }
-  return { refresh_token: body.refresh_token, email: user.email, scopes } satisfies SavedToken;
+  // TLS로 직접 받은 토큰 응답에서 sub만 읽는다. id_token 자체는 저장하지 않는다.
+  let subject: unknown = user.sub;
+  if (body.id_token !== undefined) {
+    try {
+      if (typeof body.id_token !== "string" || body.id_token.split(".").length !== 3) throw new Error();
+      const claims: unknown = JSON.parse(Buffer.from(body.id_token.split(".")[1]!, "base64url").toString("utf8"));
+      if (!isRecord(claims)) throw new Error();
+      subject = claims.sub;
+      if (user.sub !== undefined && user.sub !== subject) throw new Error();
+    } catch { throw new MailmanError("Google 계정 ID를 확인할 수 없습니다. 다시 mailman auth를 실행하세요.", 3); }
+  }
+  return { refresh_token: body.refresh_token, email: user.email, scopes, user_name: userNameFromSub(subject) } satisfies SavedToken;
+}
+
+function userNameFromSub(sub: unknown): string {
+  if (typeof sub !== "string" || !/^[A-Za-z0-9_-]+$/.test(sub)) {
+    throw new MailmanError("Google 계정 ID를 확인할 수 없습니다. 다시 mailman auth를 실행하세요.", 3);
+  }
+  return `users/${sub}`;
+}
+
+// 이전 토큰은 대기 모드가 계정 ID를 필요로 할 때 한 번만 보완한다.
+export async function getSelfUser(paths: Pick<RuntimePaths, "tokenFile">, accessToken: string, fetcher: Fetch = fetch): Promise<string> {
+  const saved = loadToken(paths.tokenFile);
+  if (saved.user_name) return saved.user_name;
+  registerSecret(accessToken);
+  const { response, body } = await requestJson(fetcher, "https://openidconnect.googleapis.com/v1/userinfo", {
+    method: "GET", headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok || !isRecord(body)) throw new MailmanError(`Google 계정 ID 조회 실패 (HTTP ${response.status}).`, 3);
+  const user_name = userNameFromSub(body.sub);
+  // 동시에 회전된 refresh token을 이전 값으로 되돌리지 않는다.
+  saveToken(paths.tokenFile, { ...loadToken(paths.tokenFile), user_name });
+  return user_name;
 }
 
 export async function getAccessToken(paths: Pick<RuntimePaths, "clientFile" | "tokenFile">, fetcher: Fetch = fetch): Promise<string> {

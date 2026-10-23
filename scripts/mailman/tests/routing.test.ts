@@ -24,9 +24,9 @@ describe("단일 진입점 라우팅", () => {
     expect(io.output.at(-1)).toBe(`mailman ${packageJson.version}`);
     expect(await main(["--help"], io)).toBe(0);
     expect(io.output.at(-1)).toBe(USAGE);
-    for (const command of ["auth", "collect", "fetch", "send"]) expect(USAGE).toContain(`  ${command} `);
+    for (const command of ["auth", "spaces", "collect", "fetch", "send", "wait"]) expect(USAGE).toContain(`  ${command} `);
     expect(USAGE).toContain(SETUP_GUIDE_URL);
-    for (const command of ["auth", "collect", "fetch", "send"] as const) {
+    for (const command of ["auth", "spaces", "collect", "fetch", "send", "wait"] as const) {
       expect(await main([command, "--help"], io)).toBe(0);
       expect(io.output.at(-1)).toBe(HELP[command]);
     }
@@ -118,7 +118,7 @@ describe("fetch --only", () => {
     expect(readSeen(paths)).toEqual(["2026-10-22T11:00:00.000000000Z", `${SPACE}/messages/bot-1`]);
 
     expect(await main(["fetch", "--no-collect", "--only", "bot"], dependencies)).toBe(0);
-    expect(io.output.at(-1)).toStartWith("[tn] 새 메시지가 없습니다. (BOT만 조회)");
+    expect(io.output.at(-1)).toStartWith(`[대상] tn (SPACE_TYPE_UNSPECIFIED, ${SPACE})\n[tn] 새 메시지가 없습니다. (BOT만 조회)`);
     expect(calls).toHaveLength(0);
     expect(existsSync(paths.logFile)).toBe(false);
   });

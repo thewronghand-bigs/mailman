@@ -10,6 +10,14 @@ export function normalizeTime(value: string): string {
   return `${new Date(millis).toISOString().slice(0, 19)}.${(match[2] ?? "").padEnd(9, "0")}Z`;
 }
 
+// 엄격한 > 필터로도 같은 시각의 메시지를 다시 받을 수 있게 경계를 1ns 겹친다.
+export function nanosecondBefore(value: string): string {
+  const time = normalizeTime(value);
+  const nanos = Number(time.slice(20, 29));
+  return nanos > 0 ? `${time.slice(0, 20)}${String(nanos - 1).padStart(9, "0")}Z`
+    : `${new Date(Date.parse(time) - 1000).toISOString().slice(0, 19)}.999999999Z`;
+}
+
 export function parseSince(value: string, now = new Date()): string {
   const invalid = () => new MailmanError("--since는 24h, 3d 같은 양의 정수 기간 또는 YYYY-MM-DD 날짜로 지정하세요.");
   const relative = /^([1-9]\d*)(h|d)$/.exec(value);
