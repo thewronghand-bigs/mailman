@@ -106,6 +106,7 @@ export function loadClient(path: string): OAuthClient {
     throw new MailmanError("Google 데스크톱 앱 OAuth 클라이언트의 필수 필드와 인증 주소를 확인하세요.");
   }
   registerSecret(client.client_secret);
+  registerSecret(client.client_id);
   return { client_id: client.client_id, client_secret: client.client_secret, auth_uri: client.auth_uri, token_uri: client.token_uri };
 }
 
@@ -158,11 +159,12 @@ async function tokenRequest(client: OAuthClient, params: Record<string, string>,
   if (isRecord(body) && typeof body.refresh_token === "string") registerSecret(body.refresh_token);
   if (isRecord(body) && typeof body.id_token === "string") registerSecret(body.id_token);
   if (isRecord(body) && body.error === "invalid_grant") {
-    throw new MailmanError("OAuth 인증이 만료되었거나 취소되었습니다. 다시 mailman auth를 실행하세요.", 3);
+    throw new RequestError("OAuth 인증이 만료되었거나 취소되었습니다. 다시 mailman auth를 실행하세요.", response.status, "invalid_grant");
   }
   if (!response.ok || !isRecord(body) || typeof body.access_token !== "string" || !body.access_token) {
     // error_description에는 요청의 비밀값이 섞일 수 있어서 그대로 출력하지 않는다.
-    throw new RequestError(`OAuth 토큰 발급 실패 (HTTP ${response.status}). OAuth 설정을 확인하거나 다시 mailman auth를 실행하세요.`, response.status);
+    const apiStatus = isRecord(body) && typeof body.error === "string" ? body.error : undefined;
+    throw new RequestError(`OAuth 토큰 발급 실패 (HTTP ${response.status}). OAuth 설정을 확인하거나 다시 mailman auth를 실행하세요.`, response.status, apiStatus);
   }
   return body;
 }
@@ -218,16 +220,23 @@ export async function getSelfUser(paths: Pick<RuntimePaths, "tokenFile">, access
   return user_name;
 }
 
+// doctor도 같은 갱신·스코프 검증을 쓰되 로컬 토큰 파일은 변경하지 않는다.
+export async function refreshAccessToken(client: OAuthClient, saved: SavedToken, fetcher: Fetch = fetch) {
+  const body = await tokenRequest(client, { grant_type: "refresh_token", refresh_token: saved.refresh_token }, fetcher);
+  if (body.scope !== undefined) scopesFromResponse(body);
+  return { accessToken: body.access_token as string,
+    refreshToken: typeof body.refresh_token === "string" ? body.refresh_token : undefined };
+}
+
 export async function getAccessToken(paths: Pick<RuntimePaths, "clientFile" | "tokenFile">, fetcher: Fetch = fetch): Promise<string> {
   // 파일이 없으면 클라이언트 확인이나 네트워크 호출보다 먼저 exit 2로 안내한다.
   const saved = loadToken(paths.tokenFile);
   const client = loadClient(paths.clientFile);
-  const body = await tokenRequest(client, { grant_type: "refresh_token", refresh_token: saved.refresh_token }, fetcher);
-  if (body.scope !== undefined) scopesFromResponse(body);
-  if (typeof body.refresh_token === "string" && body.refresh_token !== saved.refresh_token) {
-    saveToken(paths.tokenFile, { ...saved, refresh_token: body.refresh_token });
+  const { accessToken, refreshToken } = await refreshAccessToken(client, saved, fetcher);
+  if (refreshToken && refreshToken !== saved.refresh_token) {
+    saveToken(paths.tokenFile, { ...saved, refresh_token: refreshToken });
   }
-  return body.access_token as string;
+  return accessToken;
 }
 
 async function openBrowser(url: URL): Promise<void> {

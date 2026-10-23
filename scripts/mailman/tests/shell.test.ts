@@ -57,7 +57,7 @@ describe("개발 실행기와 설치/제거", () => {
     expect(result.stderr.toString()).toContain("bun을 찾을 수 없습니다");
   });
 
-  test("install.sh --dev는 실행 파일·커맨드를 레포로 링크하고 기존 파일을 백업하며 설정 예시는 한 번만 만든다", () => {
+  test("install.sh --dev는 실행 파일·커맨드를 링크하고 백업하되 설정 파일을 만들거나 수정하지 않는다", () => {
     const paths = fixture(false);
     const home = join(paths.home, "home");
     const claude = join(home, ".claude");
@@ -79,21 +79,27 @@ describe("개발 실행기와 설치/제거", () => {
     expect(backups).toHaveLength(1);
     expect(readFileSync(join(claude, "commands", backups[0]!), "utf8")).toBe("예전 커맨드");
     const config = join(claude, "mailman/config.json");
-    expect(readFileSync(config, "utf8")).toBe(readFileSync(join(scriptDir, "config.example.json"), "utf8"));
-    expect(statSync(config).mode & 0o777).toBe(0o600);
+    expect(existsSync(config)).toBe(false);
+    expect(existsSync(dirname(config))).toBe(false);
     const stdout = first.stdout.toString();
     expect(stdout).toContain("https://thewronghand-bigs.github.io/mailman/setup");
     expect(stdout).toContain("auth --client");
+    expect(stdout).toContain("spaces '검색어' --save dev");
+    expect(stdout).toContain("첫 --save가 0600 설정 파일을 만들고 그 별칭을 기본 방으로");
+    expect(stdout).toContain("--default");
     expect(stdout).toContain(join(claude, "scripts/mailman"));
     expect(stdout).not.toContain("bun을 찾을 수 없습니다");
 
     // 재실행은 같은 링크와 기존 설정을 그대로 두고 새 백업을 만들지 않는다.
-    writeFileSync(config, '{"defaultSpace":"mine","spaces":{"mine":{"space":"spaces/MINE"}}}');
+    mkdirSync(dirname(config), { recursive: true });
+    const existingConfig = '{"defaultSpace":"mine","spaces":{"mine":{"space":"spaces/MINE"}}}';
+    writeFileSync(config, existingConfig, { mode: 0o640 });
     const second = run();
     expect(second.exitCode).toBe(0);
     expect(second.stdout.toString()).toContain("이미 연결됨");
     expect(readdirSync(join(claude, "commands")).filter(name => name.includes(".bak."))).toHaveLength(1);
-    expect(readFileSync(config, "utf8")).toContain("spaces/MINE");
+    expect(readFileSync(config, "utf8")).toBe(existingConfig);
+    expect(statSync(config).mode & 0o777).toBe(0o640);
     expect(readdirSync(paths.home).filter(name => name.startsWith("mailman-config."))).toEqual([]);
     expect(existsSync(join(claude, "scripts/mailman"))).toBe(true);
   });
@@ -206,7 +212,7 @@ function releaseFixture() {
   for (const dir of [home, fakeBin, tmp]) mkdirSync(dir, { recursive: true });
   writeFileSync(join(fakeBin, "curl"), FAKE_CURL, { mode: 0o755 });
   const raw = join(server, "raw.githubusercontent.com/thewronghand-bigs/mailman", FAKE_TAG);
-  for (const file of ["commands/mailman.md", "commands/mailman-deep.md", "codex-skills/mailman/SKILL.md", "scripts/mailman/config.example.json"]) {
+  for (const file of ["commands/mailman.md", "commands/mailman-deep.md", "codex-skills/mailman/SKILL.md"]) {
     mkdirSync(dirname(join(raw, file)), { recursive: true });
     writeFileSync(join(raw, file), readFileSync(join(repoRoot, file)));
   }
@@ -261,7 +267,8 @@ describe("install.sh 릴리스 모드 (가짜 curl)", () => {
     expect(readlinkSync(join(env.codexHome, codexBackups[0]!))).toBe(repoLike);
     expect(readFileSync(join(repoLike, "SKILL.md"), "utf8")).toBe("레포 스킬 원본");
     const config = join(env.claude, "mailman/config.json");
-    expect(statSync(config).mode & 0o777).toBe(0o600);
+    expect(existsSync(config)).toBe(false);
+    expect(existsSync(dirname(config))).toBe(false);
     expect(existsSync(`${bin}.bak`)).toBe(false);
     expect(env.leftovers()).toEqual([]);
     const stdout = first.stdout.toString();
@@ -272,6 +279,12 @@ describe("install.sh 릴리스 모드 (가짜 curl)", () => {
     const requests = readFileSync(join(env.server, "requests.log"), "utf8");
     expect(requests).toContain(`/releases/download/${FAKE_TAG}/mailman-darwin-`);
     expect(requests).toContain(`/${FAKE_TAG}/codex-skills/mailman/SKILL.md`);
+    expect(requests).not.toContain("config.example.json");
+
+    // 첫 --save 등으로 생긴 설정은 재설치·다운로드 실패 때도 내용과 권한을 보존한다.
+    mkdirSync(dirname(config), { recursive: true });
+    const existingConfig = '{"defaultSpace":"mine","spaces":{"mine":{"space":"spaces/MINE"}}}';
+    writeFileSync(config, existingConfig, { mode: 0o640 });
 
     // 새 바이너리는 받았지만 커맨드 하나가 실패하면 아무것도 바꾸지 않는다.
     env.publishBinary("v2");
@@ -284,6 +297,8 @@ describe("install.sh 릴리스 모드 (가짜 curl)", () => {
       expect(readFileSync(bin, "utf8")).toContain("mailman v1");
       expect(existsSync(`${bin}.bak`)).toBe(false);
       expect(readFileSync(join(env.claude, "commands/mailman.md"), "utf8")).toBe(commandBefore);
+      expect(readFileSync(config, "utf8")).toBe(existingConfig);
+      expect(statSync(config).mode & 0o777).toBe(0o640);
       expect(env.leftovers()).toEqual([]);
     }
 
@@ -301,6 +316,8 @@ describe("install.sh 릴리스 모드 (가짜 curl)", () => {
     expect(third.stdout.toString()).toContain("변경 없음");
     expect(readdirSync(join(env.claude, "commands")).filter(name => name.includes(".bak."))).toEqual([]);
     expect(readdirSync(join(env.codexHome, "skills/mailman"))).toEqual(["SKILL.md"]);
+    expect(readFileSync(config, "utf8")).toBe(existingConfig);
+    expect(statSync(config).mode & 0o777).toBe(0o640);
     expect(env.leftovers()).toEqual([]);
   }, 15_000); // 여러 번의 설치·검증 자식 프로세스가 5초를 넘을 수 있다.
 

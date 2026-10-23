@@ -1,21 +1,23 @@
-# claude-mailman v2.2
+# claude-mailman v2.3
 
-Google Chat API를 사용자 OAuth로 호출해 메시지를 SQLite에 저장하고 CLI/슬래시 커맨드/Codex 스킬로 조회·전송한다. 배포는 단일 실행 파일 `~/.claude/bin/mailman`이고, OAuth 클라이언트는 사용자마다 자기 GCP 프로젝트에 만든다. 구조와 환경변수는 `CLAUDE.md`, 설치는 `INSTALL.md`를 참고한다.
+Google Chat API를 사용자 OAuth로 호출해 메시지를 SQLite에 저장하고 CLI/슬래시 커맨드/Codex 스킬로 조회·전송한다. 배포는 단일 실행 파일 `~/.claude/bin/mailman`이고, OAuth 클라이언트는 본인 프로젝트에서 만들거나 설정을 마친 동료의 프로젝트에서 사람마다 따로 발급받는다. 구조와 환경변수는 `CLAUDE.md`, 설치는 `INSTALL.md`를 참고한다.
 
 ## 구조
 
 - `scripts/mailman/`: 새 v2 런타임. 설정 해석은 `runtime.ts`, OAuth는 `auth.ts`, API는 `chat.ts`, 저장은 `store.ts`에 집중한다.
+- `doctor.ts`는 파일·권한·설정·인증·Chat API 접근을 진단하고 설정 가이드의 단계 링크를 표시한다. 파일·DB는 변경하지 않으며 실패는 exit 1, 경고만 있으면 0이다.
 - `collector.ts`는 모든 메시지를 증분/백필 수집하며 `fetch.ts`가 seen 커서와 스레드 출력을 담당한다.
 - `download.ts`는 업로드 첨부 저장·재사용·텍스트 펼치기, `react.ts`는 허용 이모지와 결과를 담당한다. API는 `chat.ts`에 둔다.
 - `upload.ts`는 전송 파일 전체 검증·multipart 스트리밍·업로드 실패 안내를 담당한다.
 - `send.ts`가 사용자 명의 텍스트/답글을 전송한다. 태그 접두사(`content.ts`의 `sendPrefix`)는 `runtime.ts`의 `resolveSendPrefix`가 정한다.
 - `resolve.ts`는 collect/fetch/send/wait의 대상·사람 이름을 해석하고 `--save`를 처리한다. `wait.ts`는 답장 폴링과 quiet 묶음 출력을 담당한다. `private-file.ts`는 설정·인증정보를 0600으로 원자 교체한다.
-- `cli.ts`가 단일 진입점이다: `mailman <auth|spaces|collect|fetch|send|wait|download|react>`, `--help`, `--version`. 개발 실행은 `scripts/mailman/mailman-dev`, 빌드는 `scripts/build.sh`(`dist/`, gitignore).
+- `cli.ts`가 단일 진입점이다: `mailman <auth|doctor|spaces|collect|fetch|send|wait|download|react>`, `--help`, `--version`. 개발 실행은 `scripts/mailman/mailman-dev`, 빌드는 `scripts/build.sh`(`dist/`, gitignore).
 - `install.sh`는 릴리스 바이너리와 커맨드·스킬을 모두 받아 검증한 뒤 한꺼번에 설치하고(실패 시 기존 설치 유지) `--dev`는 레포를 심볼릭 링크한다. `--target claude|codex|all`(또는 `MAILMAN_TARGET`)로 대상을 고른다. 실행 파일 백업은 `mailman.bak` 1개다. `docs/`는 GitHub Pages 공개 문서(홈·설정 가이드·개인정보처리방침)이며 사내 정보·실명을 넣지 않는다.
 - `codex-skills/mailman/SKILL.md`: Codex `$mailman` 스킬(`${CODEX_HOME:-~/.codex}/skills/mailman/`에 설치). `--dev`는 디렉터리를 링크한다(Codex는 링크된 `SKILL.md` 파일을 읽지 않는다). Claude 커맨드와 같은 DB·seen 커서를 공유한다.
 - 개인 취향은 레포가 아니라 `$MAILMAN_HOME/mailman/local.md`에 둔다. 커맨드·스킬이 먼저 읽고 우선한다. 👀 자동 조건도 바꿀 수 있으나 ✅ 승인·전송 승인·웹훅 URL 비노출은 완화할 수 없다.
 - `scripts/mailman-legacy/`: Playwright DOM/snapshot 구현 보존. v2는 이전 설정/DB와 호환하지 않는다.
 - `commands/mailman.md`, `commands/mailman-deep.md`: 안 읽은 메시지 조회와 최근 30일 백필 수집, 승인 후 전송 절차. 절차를 바꾸면 Codex 스킬도 같이 고친다.
+- 설치기는 설정 파일을 만들거나 수정하지 않는다. 첫 `--save`가 0600 설정 파일과 기본 방을 만들며 `config.example.json`은 문서 참고용이다. `spaces --save`도 공통 대상 해석을 쓴다. `--save <별칭> --default`는 새 별칭을 저장하면서 기본 방을 정하거나 같은 방의 기존 별칭의 기본 지정만 바꾼다. 기존 별칭의 space·추가 필드는 보존한다. `spaces --save <기존 별칭> --default`는 대상을 생략해도 그 별칭을 선택한다. `--default` 단독은 인자 오류, `send --dry-run`은 기본 방도 변경하지 않는다.
 
 ## Codex에서 mailman 실행
 

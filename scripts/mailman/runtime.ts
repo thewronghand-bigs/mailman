@@ -57,10 +57,10 @@ export function loadConfig(configFile: string): MailmanConfig {
   try {
     parsed = JSON.parse(readFileSync(configFile, "utf8"));
   } catch {
-    throw new MailmanError(`설정 파일을 읽을 수 없습니다: ${configFile}. 설정 가이드(${SETUP_GUIDE_URL})의 config 예시를 참고해 작성하세요.`);
+    throw new MailmanError(`설정 파일을 읽을 수 없습니다: ${configFile}. 설정 가이드(${SETUP_GUIDE_URL}#step-10)의 방 등록 안내를 확인하세요.`);
   }
   if (!isRecord(parsed) || typeof parsed.defaultSpace !== "string" || !isRecord(parsed.spaces)) {
-    throw new MailmanError(`설정 파일에 defaultSpace와 spaces가 필요합니다. 설정 가이드(${SETUP_GUIDE_URL})의 config 예시를 확인하세요.`);
+    throw new MailmanError(`설정 파일에 defaultSpace와 spaces가 필요합니다. 설정 가이드(${SETUP_GUIDE_URL}#step-10)의 방 등록 안내를 확인하세요.`);
   }
   const spaces: Record<string, MailmanSpace> = Object.create(null);
   for (const [alias, value] of Object.entries(parsed.spaces)) {

@@ -75,7 +75,7 @@ fi
 # 6. 설정·데이터·인증정보는 자동 삭제하지 않는다.
 echo ""
 echo "[mailman] 설정·데이터·인증정보는 자동 삭제하지 않습니다. 필요하면 직접 삭제하세요:"
-echo "  설정: $CONFIG_FILE"
+echo "  설정(저장한 별칭·기본 방, 있는 경우): $CONFIG_FILE"
 [ -f "$DATA_HOME/mailman/local.md" ] && echo "  개인 컨벤션: $DATA_HOME/mailman/local.md"
 echo "  DB 및 보조 파일: $DB_FILE*"
 echo "  로그: $LOG_FILE"

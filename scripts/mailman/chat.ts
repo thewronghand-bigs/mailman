@@ -183,6 +183,19 @@ export class ChatClient {
     throw new MailmanError(`스페이스 목록 상한(${maxPages}페이지)에 도달했습니다. 캐시는 갱신하지 않습니다.`, 3);
   }
 
+  // 설정 점검은 한 건만 요청한다. 페이지를 순회하거나 목록 캐시를 갱신하지 않는다.
+  async checkSpacesAccess(): Promise<boolean> {
+    const url = new URL("https://chat.googleapis.com/v1/spaces");
+    url.searchParams.set("pageSize", "1");
+    const body = await this.request(url, { method: "GET" });
+    if (!isRecord(body) || (body.spaces !== undefined && !Array.isArray(body.spaces))) {
+      throw new MailmanError("Google Chat 스페이스 목록 응답 형식이 올바르지 않습니다.", 3);
+    }
+    const spaces: unknown[] = Array.isArray(body.spaces) ? body.spaces : [];
+    for (const space of spaces) parseSpace(space);
+    return spaces.length > 0;
+  }
+
   async findDirectMessage(user: string, signal?: AbortSignal): Promise<ChatSpace> {
     const url = new URL("https://chat.googleapis.com/v1/spaces:findDirectMessage");
     url.searchParams.set("name", user);

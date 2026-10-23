@@ -1,138 +1,309 @@
 ---
-title: 설정 가이드 — 사용자별 OAuth 클라이언트
+title: 설정 가이드 — 처음 시작하기
 permalink: /setup
 ---
 
-# 설정 가이드 — 사용자별 OAuth 클라이언트
+# mailman 설정 가이드
 
-mailman은 각 사용자가 **자기 Google Cloud 프로젝트에 직접 만든 OAuth 클라이언트**로 동작합니다. 실행 파일·레포·릴리스에는 어떤 client id/secret도 들어 있지 않습니다.
+## 시작 경로 고르기
 
-준비할 계정은 둘입니다.
+Mac에 mailman을 [설치](https://github.com/thewronghand-bigs/mailman/blob/main/INSTALL.md)한 뒤, 상황에 맞는 경로로 시작하세요.
 
-- **개인 Google 계정** — Google Cloud 프로젝트 소유자. 앱 브랜딩의 지원 이메일·개발자 연락처로 씁니다.
-- **회사(Google Workspace) 계정** — 실제로 Chat 메시지를 읽고 보낼 계정. Chat API의 앱 구성(Configuration) 화면은 **Workspace 계정으로 접속해야 열립니다.** 그래서 이 계정을 프로젝트 편집자로 넣고 그 계정으로 Chat 앱을 구성합니다.
+| 경로 | 시작 단계 | 예상 시간 |
+|------|-----------|-----------|
+| **A. 이미 mailman을 설정한 동료에게 클라이언트 JSON을 받은 경우** | **[8단계부터](#step-8)** — 받은 JSON으로 `mailman auth --client` 실행 | **약 5분** |
+| **B. 처음부터 혼자 설정하는 경우** | **[1단계부터](#step-1)** — 프로젝트 만들기부터 진행 | **약 20분** |
 
-> **주의:** 회사 Workspace 관리자가 확인되지 않은 서드파티 앱의 접근을 차단해 두었다면 8단계 로그인이 "액세스 차단됨"으로 막힙니다. 이 경우 관리자에게 본인 OAuth 클라이언트 ID를 신뢰할 수 있는 앱으로 허용해 달라고 요청해야 합니다.
+**A 경로**는 동료 프로젝트의 Chat 앱 구성·브랜딩·프로덕션 게시가 끝나 있으므로 **1~7단계가 필요 없습니다.** 받은 JSON과 본인 회사 Google Workspace 계정으로 인증하면 됩니다. **동료 프로젝트의 IAM 멤버일 필요도 없습니다.** 설정을 마친 사람이 JSON을 발급하는 방법은 [동료에게 클라이언트 만들어 주기](#colleague-client)를 참고하세요.
 
-## 1. 개인 계정으로 프로젝트 만들기
+**B 경로 준비물: 개인 Google 계정(Gmail), 회사 Google Workspace 계정, 약 20분.** Google Cloud를 처음 써도 아래 순서대로 진행하면 됩니다.
 
-개인 Google 계정으로 [새 프로젝트 만들기](https://console.cloud.google.com/projectcreate)에서 프로젝트를 만듭니다. 이름은 자유입니다(예: `mailman`). 이후 모든 단계에서 상단 프로젝트 선택기가 이 프로젝트인지 확인하세요.
+회사 계정은 보통 Google Cloud 프로젝트를 만들 수 없어, 개인 계정으로 프로젝트를 만듭니다.<br>
+Chat 앱 구성은 Google Workspace 계정으로만 할 수 있어, 회사 계정을 그 프로젝트에 초대합니다.<br>
+프로젝트·OAuth 설정은 개인 계정으로 마치고, 회사 계정으로 한 번 전환해 Chat 앱을 구성한 뒤 로그인합니다.
 
-## 2. Google Chat API 사용 설정
+OAuth 클라이언트는 본인 프로젝트에서 만들거나, 설정을 마친 동료의 프로젝트에서 **사람마다 따로 발급**받습니다. 각자 회사 계정으로 로그인하며 토큰을 공유하지 않습니다. 실행 파일·레포·릴리스에는 client id/secret이 들어 있지 않습니다.
 
-[Google Chat API](https://console.cloud.google.com/apis/library/chat.googleapis.com) 페이지에서 **사용**을 누릅니다.
+아래는 전체 단계입니다. A 경로는 8단계부터 진행하세요.
 
-## 3. 회사 계정을 편집자로 추가
+| 단계 | 사용할 계정 | 할 일 |
+|------|-------------|-------|
+| [1](#step-1) | 개인 | 프로젝트 만들기·프로젝트 ID 메모 |
+| [2](#step-2) | 개인 | Google Chat API 사용 설정 |
+| [3](#step-3) | 개인 | Chat 앱을 구성할 본인 회사 계정을 프로젝트 편집자로 추가 |
+| [4](#step-4) | 개인 | 앱 브랜딩·동의 화면 설정 |
+| [5](#step-5) | 개인 | 프로덕션 게시 또는 테스트 사용자 등록 |
+| [6](#step-6) | 개인 | 데스크톱 앱 OAuth 클라이언트 JSON 다운로드 |
+| [7](#step-7) | 회사 | Chat 앱 구성·저장 |
+| [8](#step-8) | 터미널 → 회사 | mailman 인증 |
+| [9](#step-9) | 터미널 | `mailman doctor`로 점검 |
+| [10](#step-10) | 터미널·Claude Code·Codex | 방 찾기·별칭 저장·첫 조회 |
 
-[IAM](https://console.cloud.google.com/iam-admin/iam)에서 **액세스 권한 부여**를 누르고, 새 주 구성원에 회사 계정 이메일을 넣은 뒤 역할을 **기본 → 편집자**로 지정해 저장합니다.
+> **팁:** 브라우저 프로필을 개인/회사로 나눠 두면 편합니다. 아래 콘솔 주소의 `<PROJECT_ID>`는 1단계에서 메모한 값으로 바꿔 주소 표시줄에 붙여넣으세요. 모든 단계에서 콘솔 상단의 프로젝트와 오른쪽 위 로그인 계정을 확인합니다.
 
-## 4. 회사 계정으로 전환해 Chat 앱 구성
+## 1~6단계 — 개인 계정
 
-콘솔 오른쪽 위 계정 메뉴에서 **회사 계정으로 전환**하고 같은 프로젝트를 선택한 뒤 [Chat API 구성(Configuration)](https://console.cloud.google.com/apis/api/chat.googleapis.com/hangouts-chat) 탭을 엽니다.
+여기부터 6단계까지는 **개인 Gmail 계정**으로 진행합니다.
 
-- **앱 이름·아바타 URL·설명**: 자유롭게 입력합니다. 앱 이름은 mailman이 보낸 메시지의 발신자 옆에 표시됩니다.
-- **"Google Workspace 부가기능으로 빌드" 체크박스는 해제하지 마세요.** 한 번 바꾸면 되돌릴 수 없습니다.
-- **부가기능 트리거 URL**이 필수로 요구되면 "모든 트리거에 공통 HTTP 엔드포인트 URL 사용"을 고르고 자리표시 URL 하나(예: `https://example.invalid/mailman`)를 넣습니다. mailman은 Chat 이벤트를 받지 않으므로 이 URL은 쓰이지 않습니다. 본인이 관리하지 않는 실제 서버 주소는 넣지 마세요.
-- **공개 상태(Visibility)**: "도메인의 특정 사용자 및 그룹이 사용할 수 있도록 설정"을 고르고 **본인 회사 이메일만** 넣습니다.
+처음 콘솔에 들어가면 **Google Cloud 약관 동의**와 **무료 체험(결제 정보 입력)** 안내가 뜰 수 있습니다. **약관만 동의하고 무료 체험·결제 등록은 하지 않습니다.** mailman에는 결제 계정이 필요 없습니다([비용과 할당량](#비용과-할당량)).
 
-저장합니다.
+<a id="step-1"></a>
 
-## 5. 앱 브랜딩
+### [개인 계정] 1. 프로젝트 만들기
 
-[Google Auth Platform → 브랜딩](https://console.cloud.google.com/auth/branding)을 엽니다. 지원 이메일 목록에는 현재 콘솔에 로그인한 계정의 메일만 나오므로, 개인 메일을 고르려면 **개인 계정으로 다시 전환**해 진행합니다.
+1. [새 프로젝트 만들기](https://console.cloud.google.com/projectcreate)를 엽니다.
+2. 프로젝트 이름을 입력합니다. 예: `mailman`.
+3. **만들기**를 누른 뒤, 만든 프로젝트를 선택합니다.
+4. **프로젝트 ID**를 메모합니다. 프로젝트 이름이나 프로젝트 번호가 아니라 **ID**입니다. 이후 주소의 `<PROJECT_ID>`에 이 값을 넣습니다.
 
-- **앱 이름**: 4단계와 같은 이름을 권장합니다.
-- **사용자 지원 이메일**·**개발자 연락처 정보**: 개인 메일
-- **애플리케이션 홈페이지**: `https://thewronghand-bigs.github.io/mailman/`
-- **개인정보처리방침 링크**: `https://thewronghand-bigs.github.io/mailman/privacy`
-- **승인된 도메인**: `thewronghand-bigs.github.io`
-- **로고는 올리지 마세요.** 로고를 올리면 브랜딩 검증 대상이 됩니다.
+<a id="step-2"></a>
 
-## 6. 대상(Audience)에서 앱 게시
+### [개인 계정] 2. Google Chat API 사용 설정
 
-[대상(Audience)](https://console.cloud.google.com/auth/audience)에서 사용자 유형이 **외부**인지 확인하고 **앱 게시**를 눌러 게시 상태를 **프로덕션**으로 바꿉니다.
+다음 주소를 엽니다.
 
-**테스트** 상태로 두면 refresh token이 7일 뒤 만료되어 매주 다시 로그인해야 합니다. 검증을 받지 않은 프로덕션 앱이어도 본인 사용에는 문제가 없으며, 로그인 때 "확인되지 않은 앱" 경고가 표시됩니다(8단계).
+```text
+https://console.cloud.google.com/apis/library/chat.googleapis.com?project=<PROJECT_ID>
+```
 
-## 7. 데스크톱 앱 클라이언트 만들기
+**사용 설정**을 누릅니다. 이미 사용 설정되어 있다면 다음 단계로 넘어갑니다.
 
-[클라이언트](https://console.cloud.google.com/auth/clients)에서 **클라이언트 만들기**를 누르고 애플리케이션 유형을 **데스크톱 앱**으로 고릅니다. 만든 직후 나오는 창에서 **JSON 다운로드**를 눌러 `client_secret_....json` 파일을 받습니다. 나중에는 secret을 다시 내려받지 못할 수 있으니 이때 받아 두세요.
+<a id="step-3"></a>
 
-웹 애플리케이션 유형 클라이언트는 쓸 수 없습니다. 파일 안이 `{"installed": {...}}` 형태여야 합니다. 이 파일은 비밀값이므로 다른 사람과 공유하거나 커밋하지 마세요.
+### [개인 계정] 3. 회사 계정을 편집자로 추가
 
-## 8. mailman 로그인
+```text
+https://console.cloud.google.com/iam-admin/iam?project=<PROJECT_ID>
+```
+
+1. **액세스 권한 부여**를 누릅니다.
+2. 새 주 구성원에 **본인 회사 이메일**을 입력합니다.
+3. 역할에서 **기본 → 편집자**를 고르고 저장합니다.
+
+소유자 역할은 초대 수락 절차가 있어 번거롭습니다. 이 설정에는 편집자 역할을 사용합니다. 아직 회사 계정으로 전환하지 않습니다. 이 권한은 **7단계에서 Chat 앱을 구성할 본인 회사 계정**에 주는 것입니다. 이미 구성된 앱을 사용하는 동료는 IAM에 추가하지 않습니다.
+
+<a id="step-4"></a>
+
+### [개인 계정] 4. 브랜딩·동의 화면 설정
+
+```text
+https://console.cloud.google.com/auth/branding?project=<PROJECT_ID>
+```
+
+처음에는 **시작하기** 마법사가 나옵니다. 아래 내용을 차례로 입력합니다.
+
+| 항목 | 입력·선택할 값 |
+|------|----------------|
+| 앱 이름 | `mailman` |
+| 사용자 지원 이메일 | 본인 개인 Gmail |
+| 대상 | **외부(External)** |
+| 연락처 이메일 | 본인 개인 Gmail |
+| Google API 서비스 사용자 데이터 정책 동의 | 내용을 확인하고 동의 |
+
+완료 후 **브랜딩** 페이지에서 다음 항목도 입력하고 저장합니다.
+
+| 항목 | 입력·선택할 값 |
+|------|----------------|
+| 애플리케이션 홈페이지 | `https://thewronghand-bigs.github.io/mailman/` |
+| 개인정보처리방침 | `https://thewronghand-bigs.github.io/mailman/privacy` |
+| 서비스 약관(Terms of Service) 링크 | **비워 둡니다** |
+| 승인된 도메인 | `thewronghand-bigs.github.io` |
+| 앱 로고 | **올리지 않습니다** |
+
+**로고를 올리면 Google 브랜딩 검증 대상이 되어 게시가 막힐 수 있습니다.** 로고 없이 진행하세요. 아래 5단계의 테스트 모드로 먼저 써 볼 때는 홈페이지·개인정보처리방침 URL 입력을 생략할 수 있습니다.
+
+<a id="step-5"></a>
+
+### [개인 계정] 5. 프로덕션으로 게시
+
+```text
+https://console.cloud.google.com/auth/audience?project=<PROJECT_ID>
+```
+
+1. 대상이 **외부(External)**인지 확인합니다.
+2. **앱 게시**를 누르고 확인합니다.
+3. 게시 상태가 **프로덕션 단계**로 바뀌면 완료입니다.
+
+**“인증을 위해 제출해야 합니다” / “앱을 인증해야 합니다” 안내가 떠도 제출하지 않습니다.** 민감 범위를 사용하는 미검증 앱에 표시되는 안내입니다. 이 개인 사용 설정에서는 게시 상태가 프로덕션 단계인지 확인하면 됩니다. 로그인할 때는 미검증 앱 경고가 나올 수 있으며, 8단계에서 진행합니다.
+
+#### 간이 경로 — 빨리 써 보고 싶을 때
+
+게시 대신 같은 페이지의 **테스트 사용자**에 **본인 회사 이메일**을 추가하고 저장해도 됩니다. 이때는 4단계의 홈페이지·개인정보처리방침 URL을 생략할 수 있습니다.
+
+단, 테스트 모드에서는 refresh token이 **7일 뒤 만료**되어 `mailman auth`를 다시 실행해야 합니다. 계속 쓸 때는 4단계 URL을 채우고 프로덕션으로 게시한 뒤 다시 인증하세요. `doctor`는 게시 상태를 직접 읽지 못하며, 만료된 로그인에 대해 이 경로를 안내합니다.
+
+<a id="step-6"></a>
+
+### [개인 계정] 6. 데스크톱 앱 OAuth 클라이언트 만들기
+
+```text
+https://console.cloud.google.com/auth/clients/create?project=<PROJECT_ID>
+```
+
+1. 애플리케이션 유형을 **데스크톱 앱**으로 고릅니다. **웹 애플리케이션을 고르면 안 됩니다.**
+2. 이름을 입력하고 **만들기**를 누릅니다.
+3. **만든 직후** 생성 완료 창에서 **JSON 다운로드**를 눌러 파일을 받습니다. 이후 secret을 다시 볼 수 없는 경우가 있으므로 바로 다운로드하세요. 8단계에서 이 파일을 사용합니다.
+
+파일은 `{"installed": {...}}` 형태여야 합니다. **JSON을 비밀번호처럼 다루고 Git에 커밋하지 않습니다.** 본인용 JSON이나 로그인 토큰을 돌려 쓰지 마세요. 동료에게는 [별도 클라이언트를 발급](#colleague-client)합니다.
+
+## 7단계 — 회사 계정
+
+개인 계정 작업은 끝났습니다. 이제 **회사 Google Workspace 계정으로 한 번 전환**합니다.
+
+<a id="step-7"></a>
+
+### [회사 계정] 7. Chat 앱 구성
+
+콘솔 오른쪽 위에서 회사 계정으로 전환하거나, 회사 브라우저 프로필에서 다음 주소를 엽니다.
+
+```text
+https://console.cloud.google.com/apis/api/chat.googleapis.com/hangouts-chat?project=<PROJECT_ID>
+```
+
+프로젝트 선택기에 프로젝트가 안 보이면 **조직** 드롭다운을 **조직 없음**으로 바꾸세요. 개인 계정이 만든 프로젝트라 회사 조직 아래에 표시되지 않을 수 있습니다.
+
+**확인 포인트:** 상단에 **“Google Chat API는 Google Workspace 사용자에게만 제공됩니다”** 문구가 없고, 입력칸이 활성화되어 있어야 합니다. 여전히 잠겨 있다면 개인 계정으로 보고 있는지 확인하고 회사 계정으로 다시 여세요.
+
+| 항목 | 입력·선택할 값 |
+|------|----------------|
+| 앱 이름 | `mailman` — 영숫자 25자 이내 |
+| 아바타 URL | `https://developers.google.com/chat/images/quickstart-app-avatar.png` |
+| 설명 | 예: `mailman inbox reader` — 40자 이내 |
+| Build this Chat app as a Workspace add-on | **체크 상태를 유지합니다. 해제하지 마세요. 되돌릴 수 없습니다.** |
+| Enable Interactive features(대화형 기능) | **끈 상태로 둡니다.** mailman은 메시지를 폴링하므로 대화형 기능이 필요 없습니다. |
+| Markup syntax | **기본값 `MARKDOWN`을 바꾸지 않습니다.** mailman의 전송 서식 안내는 이 설정 기준입니다. |
+| 공개 범위(Visibility) | **대화형 기능이 꺼져 있으면 해당 없음.** 입력칸이 나오지 않습니다. |
+
+**대화형 기능을 꺼 두면 트리거 URL·공개 범위(Visibility) 입력칸 자체가 나오지 않습니다.** 위 내용을 입력하고 **저장**하세요. 앱 상태가 **LIVE - available to users**이면 정상입니다. 저장까지 끝내야 `Google Chat app not found` 오류를 피할 수 있습니다.
+
+> **예외 — 대화형 기능을 끌 수 없는 경우에만:** 트리거별 HTTP 엔드포인트 URL은 **모든 트리거에 공통 URL** 옵션에 `https://example.com/mailman`을 자리표시로 입력합니다. mailman은 이 주소를 호출하지 않습니다. 이때 표시되는 공개 범위는 특정 사용자 및 그룹으로 제한하고 **본인 회사 이메일만** 입력합니다.
+
+## 8~10단계 — 터미널
+
+<a id="step-8"></a>
+
+### [터미널 → 회사 계정] 8. mailman 인증
+
+Mac 터미널에서 실행합니다. 파일명은 **동료에게 받은 JSON** 또는 **6단계에서 내려받은 JSON**의 실제 이름으로 바꾸세요. A 경로는 여기서부터 시작합니다.
 
 ```bash
 ~/.claude/bin/mailman auth --client ~/Downloads/client_secret_XXXX.json
 ```
 
-mailman이 파일을 검증해 `~/.claude/secrets/mailman-oauth.json`에 0600 권한으로 복사한 뒤 브라우저를 엽니다. 이후 다시 로그인할 때는 `--client` 없이 `mailman auth`만 실행하면 됩니다.
+1. 열린 브라우저에서 **회사 계정**을 선택합니다. 프로젝트를 만든 개인 계정이 아닙니다.
+2. **“Google에서 확인하지 않은 앱” / “Google hasn't verified this app”** 화면이 나오면 **고급(Advanced)** → **mailman(으)로 이동(Go to mailman)**을 누릅니다. 앱 이름을 다르게 정했다면 그 이름이 표시됩니다.
+3. 요청하는 권한을 **모두 허용**합니다.
+4. 터미널에 **`✅ 인증 완료`와 회사 이메일·허용 스코프**가 나오면 성공입니다. 브라우저 탭을 닫아도 됩니다.
 
-1. **회사 계정**을 고릅니다.
-2. "Google에서 확인하지 않은 앱" 경고가 나오면 **고급 → (앱 이름)(으)로 이동(안전하지 않음)**을 누릅니다. 본인이 만든 클라이언트이므로 괜찮습니다.
-3. 요청 권한을 확인하고 동의합니다. 기존 필수 권한 4개+openid에 선택 리액션 권한이 추가됩니다.
-4. 터미널에 `✅ 인증 완료`와 이메일·허용 스코프가 나오면 끝입니다. 브라우저 탭은 닫아도 됩니다.
+클라이언트 파일과 토큰은 각각 기본 `~/.claude/secrets/mailman-oauth.json`, `~/.claude/secrets/mailman-token.json`에 0600 권한으로 저장됩니다. 인증 대기는 최대 5분입니다. 이후 재로그인할 때는 `~/.claude/bin/mailman auth`만 실행합니다.
 
-요청 스코프 목록:
+**`auth --client`가 성공하면 다운로드 폴더의 원본 JSON은 삭제하는 것을 권장합니다.** A 경로로 동료에게 받은 파일도 같습니다. 등록된 클라이언트 파일은 위 경로에 보관됩니다.
 
-- `openid`
-- `https://www.googleapis.com/auth/userinfo.email`
-- `https://www.googleapis.com/auth/chat.spaces.readonly`
-- `https://www.googleapis.com/auth/chat.messages.readonly`
-- `https://www.googleapis.com/auth/chat.messages.create`
-- `https://www.googleapis.com/auth/chat.messages.reactions.create` (선택)
+권한은 `openid`, 이메일 확인, 스페이스 읽기, 메시지 읽기·생성, 리액션 생성의 여섯 가지입니다. 기존 토큰에 선택 리액션 권한만 없다면 조회·전송은 가능하고 `react`만 재인증이 필요합니다.
 
-**v2.2 기존 사용자는 리액션을 사용하려면 `mailman auth`를 다시 실행해 새 권한에 동의해야 합니다.** 기존 5개 필수 스코프만 가진 토큰도 조회·전송·대기는 정상 동작합니다. `react`만 exit 2와 재인증 안내를 냅니다. 업로드 첨부 다운로드는 기존 읽기 스코프를 사용하며, 403이면 필요한 스코프를 확인한 뒤 재인증하세요. 앱은 다른 스코프를 추측해 추가하지 않습니다.
+`admin_policy_enforced`로 막히면 회사 Google Workspace 관리자 정책입니다. 관리자에게 앱 접근 허용을 문의하세요. `doctor`가 Google Cloud 설정이나 관리자 정책을 바꾸지는 않습니다.
 
-## 9. 스페이스 등록
+<a id="step-9"></a>
 
-ID를 직접 찾지 않아도 됩니다. 내 방 목록에서 이름을 확인하고 조회합니다.
+### [터미널] 9. 설정 점검
 
 ```bash
-~/.claude/bin/mailman spaces
-~/.claude/bin/mailman spaces '개발 팀' --refresh
-~/.claude/bin/mailman fetch '개발 팀' --save dev
-~/.claude/bin/mailman fetch --dm colleague@example.test --save colleague
+~/.claude/bin/mailman doctor
 ```
 
-표시 이름은 대소문자·공백을 무시한 정확 일치를 먼저, 없으면 부분 일치를 사용합니다. 후보가 여러 개면 이름·종류·ID 목록을 보고 하나를 선택하세요. `--dm`은 이메일·users/ID 또는 수집된 발신자 이름으로 기존 1:1 DM만 찾습니다. 이름이 없거나 동명이인이면 이메일을 쓰세요. `--save`를 생략하면 설정을 바꾸지 않고 이번 호출에서만 사용합니다.
+버전과 파일 경로·0600 권한, 설정 JSON, 데스크톱 클라이언트, 토큰·스코프, 토큰 갱신, Chat API 접근을 순서대로 점검합니다. 파일 내용·토큰·secret·클라이언트 ID 전체·웹훅 URL은 출력하지 않습니다. 설정·파일 권한·DB를 자동 수정하지 않으며, Chat API는 스페이스 1건만 조회합니다.
 
-`--save`는 기존 별칭을 덮어쓰지 않습니다. 설치 예시의 `team` 대신 새 별칭 `dev`를 저장한 뒤, 기본 방으로 쓰려면 `~/.claude/mailman/config.json`의 `defaultSpace`를 `dev`로 바꿉니다. 다른 설정과 웹훅은 보존되며 파일은 0600으로 원자 저장됩니다. 수동 작성 형식은 다음과 같습니다.
+- **✅**: 해당 점검 통과. 모두 ✅면 완료입니다.
+- **⚠️**: 확인할 사항. 첫 사용 전 설정 파일·DB가 없을 수 있고, 리액션 권한만 빠져 있을 수도 있습니다. 안내에 따라 10단계에서 방을 찾거나 필요한 권한을 추가하세요.
+- **❌**: 실패. 해당 줄의 **“해결: 설정 가이드 N단계”** 링크로 이동해 수정한 뒤 다시 실행합니다.
+- **건너뜀**: 앞 단계가 실패해 실행할 수 없는 점검입니다. 클라이언트·토큰을 먼저 고쳐야 토큰 갱신과 Chat API 점검을 합니다. 설정 파일 오류는 독립적인 인증 점검을 막지 않습니다.
 
-```json
-{
-  "defaultSpace": "team",
-  "sendTag": true,
-  "spaces": {
-    "team": { "space": "spaces/SPACE_ID", "webhookUrl": "" },
-    "dev": { "space": "spaces/OTHER_SPACE_ID" }
-  }
-}
-```
+실패가 하나라도 있으면 종료 코드 1, 경고만 있으면 0입니다. 브라우저에서만 볼 수 있는 동의 화면·게시 상태는 직접 진단할 수 없습니다. 그 경우 아래 표의 화면 증상과 함께 확인하세요.
 
-- `defaultSpace`는 별칭을 생략했을 때 쓰는 스페이스입니다.
-- `sendTag`(선택, 기본 `true`)를 `false`로 두면 `mailman send`가 본문 앞에 `[🤖 AI]`류 태그를 붙이지 않습니다.
-- `webhookUrl`은 선택 사항이며 카드 메시지 전송에만 씁니다. 값이 비밀이므로 이 파일도 공유하지 마세요.
-- 설정 파일 위치는 `MAILMAN_CONFIG` 환경 변수로 바꿀 수 있습니다.
+네트워크 연결 실패라면 인터넷·프록시·방화벽을 확인합니다. Claude Code·Codex에서만 실패하면 해당 실행 환경의 경로·네트워크 권한도 확인하세요([설치 문서](https://github.com/thewronghand-bigs/mailman/blob/main/INSTALL.md#codex)).
 
-확인:
+<a id="step-10"></a>
+
+### [터미널·Claude Code·Codex] 10. 방 찾기와 첫 사용
+
+이하 `mailman`은 `~/.claude/bin/mailman`의 줄임말입니다. PATH에 없다면 전체 경로로 실행하세요.
 
 ```bash
-~/.claude/bin/mailman fetch dev
+mailman spaces '검색어'
+mailman spaces '정확한 방 표시 이름' --save dev
+mailman fetch dev
 ```
 
-Claude Code에서는 `/mailman dev`로 같은 내용을 봅니다. 승인한 질문을 보낼 때 `send --wait`로 답장을 모아 기다릴 수 있습니다(`--timeout` 최대 2h). 답장이 없으면 exit 4입니다. `send --wait`가 exit 5면 전송은 완료됐고 대기만 실패·중단된 것이므로 재전송하지 마세요. 전송 요청 중 중단은 Chat에서 전송 여부를 먼저 확인하세요. 이메일 `--from`은 기존 DM의 수집 기록 또는 최근 메시지로 상대 ID를 전송 전에 확정해야 합니다. DM이 없거나 확정할 수 없으면 수집된 정확한 이름이나 users/ID를 쓰세요. `--dry-run --save`는 저장할 예정만 표시하고 설정을 바꾸지 않습니다.
+첫 명령으로 방 이름을 찾고, 두 번째 명령으로 **새 별칭** `dev`를 저장한 뒤 조회합니다. 설치기는 설정 파일을 만들지 않습니다. **처음 저장한 별칭이 기본 방**이 되며, 첫 `--save`가 설정 파일을 0600 권한으로 만듭니다. 설정 파일을 직접 편집할 필요가 없습니다. 후보가 여러 개면 출력된 이름으로 범위를 좁히세요. ID를 직접 찾거나 입력할 필요가 없습니다. `fetch '표시 이름' --save dev`로 조회하면서 저장해도 됩니다.
 
-## 문제 해결
+**기본 방을 바꾸려면 `--save <별칭> --default`를 사용합니다.** 새 방을 저장하면서 기본으로 정하거나, 이미 저장한 별칭의 기본 지정만 바꿀 수 있습니다.
 
-| 증상 | 확인 |
-|------|------|
-| `OAuth 클라이언트 파일이 없습니다` (exit 2) | `mailman auth --client <다운로드한 JSON>` |
-| `{"installed": ...} 형식이어야 합니다` | 7단계에서 **데스크톱 앱** 유형으로 다시 만듭니다 |
-| 로그인 화면에서 "액세스 차단됨" | Workspace 관리자의 서드파티 앱 정책 확인 |
-| 7일마다 다시 로그인해야 함 | 6단계에서 앱을 프로덕션으로 게시 |
-| `invalid_grant` (exit 3) | `mailman auth`로 다시 로그인 |
-| 리액션 권한 없음 (exit 2) | `mailman auth` 재실행 후 선택 리액션 권한 동의 |
-| HTTP 403/404 | 스페이스 멤버 여부, Chat API 사용 설정, 4단계 Chat 앱 구성·공개 상태 확인 |
+```bash
+mailman spaces '다른 방 표시 이름' --save team --default
+mailman spaces --save dev --default   # 기존 dev를 기본 방으로 변경
+```
+
+`--save`는 기존 별칭의 `space` 값을 덮어쓰지 않습니다. 기존 별칭에 `--default`를 붙일 때도 같은 방이어야 하며, 다른 방을 저장하려면 새 별칭을 고릅니다. 이전 설치의 예시 설정(`spaces/SPACE_ID`, `spaces/AAAAxxxxxxx` 등)이 남아 있다면, 실제 방을 저장할 때 **`--default`도 붙여** 기본 방을 바꾸세요. `--save`를 빼면 등록 없이 이번 호출에서만 사용합니다.
+
+```text
+Claude Code: /mailman dev
+Codex:       $mailman
+```
+
+대상을 생략한 `/mailman`·`$mailman`·`mailman fetch`는 기본 방을 조회합니다. 다른 방은 저장한 별칭을 지정하세요. 두 도구는 같은 DB와 조회 커서를 공유합니다.
+
+설정 JSON이 깨졌거나 `defaultSpace`가 `spaces`에 없는 경우에는 `doctor`가 ❌를 표시합니다. 기존 설정을 보존하면서 JSON 문법과 기본 별칭의 등록 여부를 확인하세요. 인증부터 다시 할 필요는 없습니다.
+
+<a id="colleague-client"></a>
+
+## 동료에게 클라이언트 만들어 주기
+
+B 경로로 설정을 마친 사람이 **프로젝트를 만든 개인 계정**으로 진행합니다. [5단계의 프로덕션 게시](#step-5)와 [7단계의 Chat 앱 구성](#step-7)이 끝나 있어야 동료가 A 경로로 바로 인증할 수 있습니다. 테스트 모드로만 써 봤다면 먼저 프로덕션으로 게시하세요.
+
+```text
+https://console.cloud.google.com/auth/clients/create?project=<PROJECT_ID>
+```
+
+1. 애플리케이션 유형을 **데스크톱 앱**으로 고릅니다.
+2. 이름을 사람별로 입력합니다. 예: **`mailman-홍길동`**. 이 이름은 콘솔에서 본인만 보는 관리용 이름입니다. 상대의 동의 화면에는 브랜딩에서 정한 앱 이름 **mailman**이 보입니다.
+3. **만들기**를 누르고 **만든 직후 JSON 다운로드**를 합니다. 이후 secret을 다시 볼 수 없는 경우가 있습니다.
+4. JSON은 **mailman으로 보내지 말고 사내 메신저에서 직접 첨부해 DM으로 보냅니다.** 상대에게 **[8단계부터](#step-8)** 진행하라고 안내합니다. **이메일·공개 채널·레포로는 전달하지 않습니다.**
+5. 전달 뒤 **본인 다운로드 폴더의 사본은 삭제하는 것을 권장**합니다. 나중에 필요하면 콘솔에서 새로 발급하세요.
+
+**사람마다 클라이언트를 따로 만드세요.** 퇴사하거나 문제가 생겼을 때 그 사람의 클라이언트만 삭제해 접근을 끊을 수 있습니다. 여러 사람에게 같은 JSON을 돌려 쓰지 않습니다.
+
+**동료를 IAM 편집자로 추가하지 마세요.** 편집자는 프로젝트 설정·OAuth 클라이언트·동의 화면까지 바꿀 수 있어 사용 권한으로는 과합니다. 동료에게 필요한 것은 **그 사람용 클라이언트 JSON뿐**입니다. 3단계에서 본인 회사 계정에 준 편집자 권한과 구분하세요.
+
+알아 둘 점:
+
+- 동료의 동의 화면에 프로젝트 소유자의 **지원·연락처 이메일(개인 메일)**이 보입니다.
+- **미검증 앱의 누적 사용자 100명 한도**와 **Chat API 할당량**은 같은 프로젝트의 모든 클라이언트가 함께 씁니다. 클라이언트를 나눠도 이 한도는 늘어나지 않습니다.
+- Claude/Codex 커맨드·스킬은 **자격증명 파일을 첨부하지 않고 경고하며, 이 제한은 완화할 수 없습니다.** 동료용 클라이언트 JSON도 **mailman으로 보내지 말고 사내 메신저에서 직접 첨부해 DM으로 보내세요.**
+
+## 비용과 할당량
+
+**Google Chat API는 사용량 과금이 없고, 분당 요청 수 같은 할당량만 있습니다. 결제 계정(빌링)은 연결할 필요가 없으며, 연결하지 않는 것을 권장합니다.** mailman은 Pub/Sub 같은 유료 서비스를 사용하지 않습니다.
+
+한도를 넘으면 요청이 잠시 **HTTP 429**로 거절됩니다. mailman의 `wait`·`send --wait`는 **답장 조회 중** 429를 만나면 대기 간격을 늘려 재시도합니다. 전송 POST는 자동 재시도하지 않습니다.
+
+## 자주 막히는 곳
+
+| 증상(화면 문구·오류) | 원인 | 해결 단계 | `mailman doctor`가 이렇게 표시 |
+|--------------------|------|-----------|--------------------------------|
+| “Google Chat API는 Google Workspace 사용자에게만 제공됩니다”와 잠긴 입력칸 | 개인 계정으로 Chat 앱 구성 페이지를 봄 | [7단계](#step-7), 회사 계정으로 전환 | 저장이 안 된 상태에서는 `❌ Google Chat 앱 구성이 없음`일 수 있음. 브라우저의 현재 계정은 직접 확인하지 못함 |
+| `Google Chat app not found` / 스페이스 목록 HTTP 404 | Chat 앱 구성이 저장되지 않음 | [7단계](#step-7) 완료 | `❌ Chat API: Google Chat 앱 구성이 없음 (Chat app not found)` |
+| `has not been used in project` / `SERVICE_DISABLED` | 해당 프로젝트의 Chat API 비활성화 | [2단계](#step-2) | `❌ Chat API: Google Chat API가 사용 설정되지 않음 (SERVICE_DISABLED)` |
+| 동의 화면 `access_denied`, 테스트 사용자가 아님 | 테스트 모드에 회사 이메일 미등록 또는 동의 거부 | [5단계](#step-5), 게시하거나 테스트 사용자 추가 후 [8단계](#step-8) | 인증 전이면 `❌ 토큰: 토큰 파일이 없음`. 갱신 응답이 `access_denied`면 `❌ 인증 접근이 거부됨` |
+| 게시할 때 홈페이지·개인정보처리방침 필요 | 브랜딩 URL 미입력 | [4단계](#step-4) 입력 후 [5단계](#step-5) | 브랜딩 자체는 진단하지 못함. 로그인 미완료면 `❌ 토큰: 토큰 파일이 없음`, 기존 유효 토큰이면 ✅일 수도 있음 |
+| “Google에서 확인하지 않은 앱” / “Google hasn't verified this app” | 미검증 앱에 표시되는 정상 경고 | [8단계](#step-8), 고급 → mailman으로 이동 | 인증 전이면 토큰 없음, 인증 후에는 `✅ 토큰 갱신: 성공`과 `✅ Chat API` |
+| `admin_policy_enforced` / 관리자 정책 차단 | 회사 Workspace의 서드파티 앱 제한 | [8단계](#step-8), Workspace 관리자 문의 | 인증 전이면 토큰 없음. 갱신/API 응답에서 정책을 확인하면 `❌ 관리자 정책으로 차단됨` |
+| 7일마다 로그인 풀림 / `invalid_grant` | 테스트 모드의 7일 토큰 만료일 수 있음. 권한 철회 등도 가능 | [5단계](#step-5) 게시 후 [8단계](#step-8) 재인증 | `❌ 토큰 갱신: 로그인이 만료됨 — 7일 만료(테스트 모드)였다면…` |
+| 클라이언트 유형 오류 / `web` JSON | 웹 애플리케이션 유형으로 생성 | [6단계](#step-6), 데스크톱 앱으로 다시 만들어 [8단계](#step-8)에서 등록 | `❌ 클라이언트 파일: web(웹 애플리케이션) 유형은 사용할 수 없습니다` |
+| 클라이언트 파일 없음 | JSON 다운로드 또는 등록 전 | 받은 JSON이 있으면 [8단계](#step-8)의 `auth --client`, 처음 설정한다면 [6단계](#step-6) | `❌ 클라이언트 파일 없음 — 받은 JSON이 있으면 8단계…` |
+| `invalid_client` / `deleted_client` / `unauthorized_client` | 사용하던 OAuth 클라이언트가 삭제·비활성화됨 | 클라이언트를 준 사람에게 새 JSON을 받거나 [6단계](#step-6)에서 직접 만든 뒤 [8단계](#step-8)의 `auth --client`로 등록 | `❌ 토큰 갱신: 이 OAuth 클라이언트가 삭제·비활성화됨` |
+| 설정 파일 없음 / 예시 설정이 남음 | 기본 방 미등록 | [10단계](#step-10), 실제 방을 `--save`로 등록. 기존 예시 설정은 `--default`도 지정 | `⚠️ 설정 파일: 아직 기본 방이 없습니다` |
+| 필수 스코프 누락 / HTTP 401 | 권한 동의 누락 또는 인증 거부 | [8단계](#step-8), `mailman auth` 재실행 | `❌ 토큰: 필수 스코프가 부족함` 또는 `❌ 인증이 거부됨 (HTTP 401)` |
+| 리액션 권한 없음 | 기존 토큰에 선택 스코프 없음 | 리액션을 쓸 때 [8단계](#step-8) 재인증 | `⚠️ 리액션 스코프 없음 — react만 불가` |
+| 연결 오류·시간 초과 | 인터넷·프록시·방화벽·실행 환경 권한 | [9단계](#step-9) | `❌ 네트워크 연결 실패`, 갱신 실패 뒤 Chat API는 `건너뜀` |
 
 [mailman 홈](index.md) · [개인정보처리방침](privacy.md)

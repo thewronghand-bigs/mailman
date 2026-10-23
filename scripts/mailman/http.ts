@@ -198,5 +198,8 @@ export function chatError(status: number, body: unknown): MailmanError {
     ? body.error.message : "Google Chat 요청에 실패했습니다.";
   // 한 줄만 출력한다. 응답 전체나 요청 헤더/본문은 출력하지 않는다.
   const apiStatus = isRecord(body) && isRecord(body.error) && typeof body.error.status === "string" ? body.error.status : undefined;
-  return new RequestError(`HTTP ${status}: ${redact(message).replace(/[\r\n\x00-\x1f\x7f]+/g, " ")}`, status, apiStatus);
+  // SERVICE_DISABLED 같은 구조화된 원인은 진단에만 사용하고 응답 상세는 출력하지 않는다.
+  const details: unknown[] = isRecord(body) && isRecord(body.error) && Array.isArray(body.error.details) ? body.error.details : [];
+  const reasons = details.filter(isRecord).map(detail => detail.reason).filter((reason): reason is string => typeof reason === "string");
+  return new RequestError(`HTTP ${status}: ${redact(message).replace(/[\r\n\x00-\x1f\x7f]+/g, " ")}`, status, apiStatus, reasons);
 }
