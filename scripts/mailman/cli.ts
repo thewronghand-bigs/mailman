@@ -6,6 +6,7 @@ import { collectMessages, logCollection, logCollectionFailure, logWaitWarning } 
 import { errorMessage, MailmanError, throwIfAborted } from "./errors";
 import { printInbox, type SenderType } from "./fetch";
 import { attachmentExpander, downloadAttachment, driveDescription, messageAttachments, renderDownloaded } from "./download";
+import { runDoctor } from "./doctor";
 import type { Fetch } from "./http";
 import packageJson from "./package.json" with { type: "json" };
 import type { SendAgent } from "./content";
@@ -24,7 +25,7 @@ import type { Database } from "bun:sqlite";
 declare const MAILMAN_BUILD_VERSION: string | undefined;
 export const VERSION = typeof MAILMAN_BUILD_VERSION === "string" ? MAILMAN_BUILD_VERSION : packageJson.version;
 
-export type Command = "auth" | "spaces" | "collect" | "fetch" | "send" | "wait" | "download" | "react";
+export type Command = "auth" | "doctor" | "spaces" | "collect" | "fetch" | "send" | "wait" | "download" | "react";
 export type Arguments = {
   help: boolean;
   spaceKey?: string;
@@ -35,6 +36,7 @@ export type Arguments = {
   agent?: SendAgent;
   dm?: string;
   save?: string;
+  makeDefault?: boolean;
   from?: string;
   quietMs?: number;
   timeoutMs?: number;
@@ -53,12 +55,16 @@ export type Arguments = {
   tag: boolean;
 };
 
-const COMMANDS: readonly Command[] = ["auth", "spaces", "collect", "fetch", "send", "wait", "download", "react"];
+const COMMANDS: readonly Command[] = ["auth", "doctor", "spaces", "collect", "fetch", "send", "wait", "download", "react"];
 const TARGET_COMMANDS: readonly Command[] = ["collect", "fetch", "send", "wait"];
+const ALIAS_COMMANDS: readonly Command[] = ["spaces", ...TARGET_COMMANDS];
 
+const SAVE_HELP = `--save <별칭>: 해석된 대상을 설정에 0600으로 원자 저장. 처음 저장한 별칭이 기본 방.
+--save <별칭> --default: 기본 방 변경. 기존 별칭은 같은 방일 때 기본 방만 변경하며 space 값은 덮어쓰지 않음.
+대상을 생략한 --save <기존 별칭> --default는 그 별칭을 선택. send --dry-run은 별칭·기본 방 모두 변경하지 않음.`;
 const TARGET_HELP = `대상: config 별칭 → spaces/ID → --dm <users/ID|이메일|수집된 사람 이름> → 스페이스 표시 이름.
 위치 인자와 --dm은 함께 쓸 수 없음. 이름 후보가 여러 개면 선택하지 않고 목록을 표시.
---save <별칭>: 해석된 대상을 설정에 0600으로 원자 저장 (기존 별칭 덮어쓰기 금지).
+${SAVE_HELP}
 빈 문자열/공백 대상은 인자 오류. 표시 이름 캐시는 24시간 초과 시 갱신 (오프라인이면 경고 후 기존 캐시).`;
 const WAIT_HELP = `--thread <spaces/.../threads/...>: 이 스레드만. --from <사람>: 이 발신자만 (둘 다 seen 유지).
 --quiet 60s: 마지막 답장 이후 조용한 시간. --timeout 30m: 전체 대기 (최대 2h). --interval 15s: 폴링 간격.
@@ -75,7 +81,8 @@ export const USAGE = `mailman — Google Chat 스페이스 메시지를 로컬�
 
 명령:
   auth [--client <client_secret.json>]    Google 로그인. --client로 OAuth 클라이언트 JSON을 등록
-  spaces [검색어] [--refresh]              내가 속한 스페이스 목록·검색 (DB 캐시)
+  doctor                                 설정·인증·Chat API 접근 점검과 해결 단계 안내
+  spaces [검색어] [--refresh] [--save <별칭>] [--default]  스페이스 목록·검색·별칭 저장
   collect [스페이스] [--deep]              Chat API 증분 수집 (--deep: 최근 30일 백필)
   fetch [스페이스] [옵션]                  수집 후 새 메시지 조회
   send [스페이스] [옵션]                   stdin 본문을 사용자 명의로 태그를 붙여 전송
@@ -90,6 +97,11 @@ mailman --version        버전
 설정 가이드: ${SETUP_GUIDE_URL}`;
 
 export const HELP: Record<Command, string> = {
+  doctor: `사용: mailman doctor
+버전·파일 경로/0600 권한, 설정 JSON, 데스크톱 클라이언트, 필수/선택 스코프, 토큰 갱신, Chat API 접근을 순서대로 점검.
+파일·DB·설정을 변경하지 않으며 로그인 창을 열지 않음. 토큰 갱신과 스페이스 1건 조회에 네트워크를 사용.
+실패는 exit 1, 경고만 있으면 exit 0. 앞 단계 실패에 의존하는 점검은 건너뜀.
+해결 단계: ${SETUP_GUIDE_URL}`,
   auth: `사용: mailman auth [--client <client_secret.json>]
 브라우저에서 Google 로그인·권한 동의 후 refresh token을 저장한다 (최대 5분).
 --client: Google에서 받은 데스크톱 앱 OAuth 클라이언트 JSON을 검증해 클라이언트 파일 경로로 0600 복사한 뒤 로그인.
@@ -97,9 +109,11 @@ export const HELP: Record<Command, string> = {
   collect: `사용: mailman collect [스페이스] [--deep]
 Google Chat API 증분 수집. --deep(또는 MAILMAN_DEEP=1)이면 수집 커서와 무관하게 최근 30일 백필.
 ${TARGET_HELP}`,
-  spaces: `사용: mailman spaces [검색어] [--refresh]
+  spaces: `사용: mailman spaces [검색어] [--refresh] [--save <별칭>] [--default]
 내가 속한 스페이스의 표시 이름·종류·ID를 출력. 검색어는 대소문자·공백을 무시한 표시 이름 부분 일치.
-캐시가 없거나 --refresh면 Google Chat API 목록을 최대 1,000페이지 받아 DB 캐시를 교체.`,
+캐시가 없거나 --refresh면 Google Chat API 목록을 최대 1,000페이지 받아 DB 캐시를 교체.
+--save는 config 별칭·spaces/ID·표시 이름을 해석. 표시 이름은 정확 일치 우선, 없으면 부분 일치하며 후보가 유일해야 저장.
+${SAVE_HELP}`,
   fetch: `사용: mailman fetch [스페이스] [--since <기간|날짜>] [--only bot|human] [--no-collect] [--deep]
 수집 후 mailman이 마지막으로 보여준 이후의 새 메시지를 최대 200건 조회 (첫 조회는 24시간). 수집 실패 시 기존 DB 출력.
 --since 24h / 3d / 2026-10-01: 지정 시점 이후 조회, seen 커서 유지.
@@ -190,8 +204,10 @@ export function parseArguments(command: Command, args: string[], now = new Date(
       result.client = value(++index, "--client 뒤에 Google에서 받은 client_secret JSON 경로를 지정하세요.");
     } else if (arg === "--dm" && TARGET_COMMANDS.includes(command) && result.dm === undefined) {
       result.dm = value(++index, "--dm 뒤에 사람 이름, 이메일 또는 users/ID를 지정하세요.");
-    } else if (arg === "--save" && TARGET_COMMANDS.includes(command) && result.save === undefined) {
+    } else if (arg === "--save" && ALIAS_COMMANDS.includes(command) && result.save === undefined) {
       result.save = value(++index, "--save 뒤에 별칭을 지정하세요.");
+    } else if (arg === "--default" && ALIAS_COMMANDS.includes(command) && !result.makeDefault) {
+      result.makeDefault = true;
     } else if (arg === "--refresh" && command === "spaces" && !result.refresh) {
       result.refresh = true;
     } else if (arg === "--wait" && command === "send" && !result.wait) {
@@ -215,7 +231,7 @@ export function parseArguments(command: Command, args: string[], now = new Date(
     if (command === "react") result.emoji = parseEmoji(positional[1]!);
     return result;
   }
-  if (positional.length > (command === "auth" ? 0 : 1)) throw new MailmanError(HELP[command]);
+  if (positional.length > (command === "auth" || command === "doctor" ? 0 : 1)) throw new MailmanError(HELP[command]);
   if (result.deep && !result.collect) throw new MailmanError("--deep과 --no-collect는 함께 쓸 수 없습니다.");
   // 태그를 끄면서 라벨을 지정하는 것은 의도가 충돌하므로 한쪽을 무시하지 않고 거절한다.
   if (result.agent !== undefined && !result.tag) throw new MailmanError("--agent와 --no-tag는 함께 쓸 수 없습니다.");
@@ -223,6 +239,7 @@ export function parseArguments(command: Command, args: string[], now = new Date(
   for (const [label, entry] of [[command === "spaces" ? "검색어" : "대상", result.spaceKey], ["--dm", result.dm], ["--from", result.from], ["--save", result.save]]) {
     if (entry !== undefined) requireName(entry, label!);
   }
+  if (result.makeDefault && result.save === undefined) throw new MailmanError("--default는 --save <별칭>과 함께 쓰세요.");
   if (result.spaceKey !== undefined && result.dm !== undefined) throw new MailmanError("위치 인자와 --dm은 함께 쓸 수 없습니다.");
   if (result.dryRun && result.wait) throw new MailmanError("--dry-run과 --wait는 함께 쓸 수 없습니다.");
   if (command === "send" && !result.wait && [result.from, result.quietMs, result.timeoutMs, result.intervalMs].some(option => option !== undefined)) {
@@ -274,6 +291,7 @@ export async function main(args: string[], dependencies: Dependencies = {}): Pro
     if (options.help) { await out(HELP[command]); return 0; }
     const env = dependencies.env ?? process.env;
     const paths = dependencies.paths ?? getRuntimePaths(env);
+    if (command === "doctor") return await runDoctor(paths, VERSION, dependencies.fetcher ?? fetch, out);
     if (command === "send") uploadFiles = validateUploadFiles(options.attach ?? []);
     const waiting = command === "wait" || options.wait;
     const controller = new AbortController();
@@ -331,18 +349,24 @@ export async function main(args: string[], dependencies: Dependencies = {}): Pro
       }
       return 0;
     }
-    if (command === "spaces") {
+    if (command === "spaces" && options.save === undefined) {
       db = openDatabase(paths.dbPath);
       const spaces = searchSpaces(await listSpaces(db, getClient, options.refresh, now), options.spaceKey);
       await out(spaces.length ? spaces.map(space => `- ${formatSpace(space)}`).join("\n") : "일치하는 스페이스가 없습니다. mailman spaces --refresh로 확인하세요.");
       return 0;
     }
-    const config = loadConfig(paths.configFile);
+    // 첫 별칭 등록은 설정 파일 직접 편집 없이 시작할 수 있다. 실제 저장은 대상 해석 후에 한다.
+    const config = options.save !== undefined && !existsSync(paths.configFile)
+      ? { defaultSpace: "", spaces: {}, sendTag: true } : loadConfig(paths.configFile);
+    // 기존 별칭의 기본 방 변경은 대상을 다시 입력하지 않아도 그 별칭을 사용한다.
+    const targetOptions = { ...options, spaceKey: options.spaceKey ?? (options.makeDefault && options.save !== undefined &&
+      options.dm === undefined && Object.hasOwn(config.spaces, options.save) ? options.save : undefined) };
     const waitSettings = waiting ? collectionOptions(env) : undefined;
-    const requested = options.spaceKey ?? config.defaultSpace;
+    const requested = targetOptions.spaceKey ?? config.defaultSpace;
     const needsResolution = options.dm !== undefined || (!Object.hasOwn(config.spaces, requested) && !requested.startsWith("spaces/"));
-    if (needsResolution || existsSync(paths.dbPath) || waiting) db = openDatabase(paths.dbPath);
-    const target = await resolveTarget(config, db, getClient, options, now, err);
+    if (needsResolution || existsSync(paths.dbPath) || waiting || options.refresh) db = openDatabase(paths.dbPath);
+    if (command === "spaces" && options.refresh) await listSpaces(db!, getClient, true, now);
+    const target = await resolveTarget(config, db, getClient, targetOptions, now, err);
     const spaceKey = target.spaceKey;
     const space = { space: target.name };
     if (options.thread) validateThread(space.space, options.thread);
@@ -358,7 +382,11 @@ export async function main(args: string[], dependencies: Dependencies = {}): Pro
       self = await getSelfUser(paths, await accessToken!, fetcher);
       if (options.from !== undefined) from = await resolveWaitPerson(db!, api, options.from, self, now, waitSettings!.backfillDays, loadToken(paths.tokenFile).email);
     }
-    if (options.save !== undefined) saveAlias(paths.configFile, options.save, space.space, options.dryRun);
+    if (options.save !== undefined) saveAlias(paths.configFile, options.save, space.space, { dryRun: options.dryRun, makeDefault: options.makeDefault });
+    if (command === "spaces") {
+      await out(`${header()}\n[별칭] ${options.save}: ${options.makeDefault ? "기본 방으로 지정했습니다." : "저장했습니다."}`);
+      return 0;
+    }
     const wait = async (startTime: string, self: string, otherSelf?: string, thread = options.thread): Promise<number> => {
       const api = await getClient();
       db ??= openDatabase(paths.dbPath);
@@ -380,7 +408,7 @@ export async function main(args: string[], dependencies: Dependencies = {}): Pro
       const { prefix, untaggedReason } = resolveSendPrefix(options, config, env);
       const bodyText = buildMessageText(text, prefix, uploadFiles.length > 0);
       if (options.dryRun) {
-        await out(`${header()}\n[전송 미리보기]${options.thread ? `\nthread name: ${options.thread}` : ""}\n${bodyText ?? "(텍스트 없이 첨부만 전송)"}${uploadPreview(uploadFiles)}${options.save !== undefined ? `\n[별칭] ${options.save}: 저장할 예정 (미리보기이므로 설정 변경 없음)` : ""}`);
+        await out(`${header()}\n[전송 미리보기]${options.thread ? `\nthread name: ${options.thread}` : ""}\n${bodyText ?? "(텍스트 없이 첨부만 전송)"}${uploadPreview(uploadFiles)}${options.save !== undefined ? `\n[별칭] ${options.save}: ${options.makeDefault ? "기본 방으로 지정할 예정" : "저장할 예정"} (미리보기이므로 설정 변경 없음)` : ""}`);
         return 0;
       }
       const api = await getClient();

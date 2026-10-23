@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { ChatClient, type ChatSpace } from "../chat";
 import { main, parseArguments } from "../cli";
 import { listSpaces, normalizeName, resolvePerson, resolveTarget, saveAlias, targetHeader, SPACE_CACHE_MAX_AGE_MS } from "../resolve";
@@ -151,6 +151,134 @@ describe("공통 대상 해석", () => {
     expect(readFileSync(paths.configFile, "utf8")).toBe(saved);
   });
 
+  test("--default는 새 별칭과 기본 방을 함께 저장하고 기존 별칭의 모든 필드를 보존한다", () => {
+    const paths = fixture(false);
+    const original = { defaultSpace: "tn", sendTag: false, custom: { preserved: true }, spaces: {
+      tn: { space: SPACE, webhookUrl: "https://example.test/fixture-hook", extra: "보존" },
+    } };
+    writeFileSync(paths.configFile, JSON.stringify(original));
+    saveAlias(paths.configFile, "new", "spaces/new", { makeDefault: true });
+    const added = { ...original, defaultSpace: "new", spaces: { ...original.spaces, new: { space: "spaces/new" } } };
+    expect(JSON.parse(readFileSync(paths.configFile, "utf8"))).toEqual(added);
+    chmodSync(paths.configFile, 0o644);
+    saveAlias(paths.configFile, "tn", SPACE, { makeDefault: true });
+    expect(JSON.parse(readFileSync(paths.configFile, "utf8"))).toEqual({ ...added, defaultSpace: "tn" });
+    expect(statSync(paths.configFile).mode & 0o777).toBe(0o600);
+    const before = readFileSync(paths.configFile, "utf8");
+    for (const dryRun of [false, true]) {
+      expect(() => saveAlias(paths.configFile, "tn", "spaces/other", { makeDefault: true, dryRun })).toThrow("덮어쓰지");
+      expect(readFileSync(paths.configFile, "utf8")).toBe(before);
+    }
+    expect(() => saveAlias(paths.configFile, "tn", SPACE)).toThrow("덮어쓰지");
+  });
+
+  test("spaces --save는 설정 없이 정확 일치를 선택해 첫 기본 방을 만들고 대상 없는 fetch로 이어진다", async () => {
+    const paths = fixture();
+    unlinkSync(paths.configFile);
+    const api = mockFetch(url => url.hostname === "oauth2.googleapis.com" ? json({ access_token: "fixture-access-secret" })
+      : json({ spaces: [named("first", "개발 팀"), named("second", "개발 팀 공지")] }));
+    const output: string[] = [];
+    const dependencies = { paths, now: NOW, env: {}, fetcher: api.fetcher, stdout: (text: string) => output.push(text), stderr: () => {} };
+    expect(await main(["spaces", "개발 팀", "--save", "dev"], dependencies)).toBe(0);
+    expect(output[0]).toStartWith("[대상] 개발 팀 (SPACE, spaces/first)");
+    expect(loadConfig(paths.configFile)).toEqual({ defaultSpace: "dev", spaces: { dev: { space: "spaces/first" } }, sendTag: true });
+    expect(statSync(paths.configFile).mode & 0o777).toBe(0o600);
+    expect(api.calls).toHaveLength(2);
+    expect(api.calls.map(call => call.url.pathname)).toEqual(["/token", "/v1/spaces"]);
+    expect(await main(["fetch", "--no-collect"], dependencies)).toBe(0);
+    expect(output.at(-1)).toStartWith("[대상] 개발 팀 (SPACE, spaces/first)");
+    expect(api.calls).toHaveLength(2);
+  });
+
+  test("spaces --save 다중 후보는 저장하지 않으며 --refresh 후의 유일한 방만 저장한다", async () => {
+    const paths = fixture();
+    unlinkSync(paths.configFile);
+    const db = openDatabase(paths.dbPath);
+    cacheSpaces(db, [named("one", "Team A"), named("two", "Team B")], NOW.toISOString());
+    db.close();
+    const api = mockFetch(url => url.hostname === "oauth2.googleapis.com" ? json({ access_token: "fixture-access-secret" })
+      : json({ spaces: [named("refreshed", "Team C")] }));
+    const errors: string[] = [];
+    const dependencies = { paths, now: NOW, env: {}, fetcher: api.fetcher, stdout: () => {}, stderr: (text: string) => errors.push(text) };
+    expect(await main(["spaces", "Team", "--save", "dev"], dependencies)).toBe(1);
+    expect(errors.join("\n")).toContain("후보가 여러 개");
+    expect(errors.join("\n")).toContain("spaces/one");
+    expect(errors.join("\n")).toContain("spaces/two");
+    expect(existsSync(paths.configFile)).toBe(false);
+    expect(api.calls).toHaveLength(0);
+    expect(await main(["spaces", "Team", "--refresh", "--save", "dev", "--default"], dependencies)).toBe(0);
+    expect(loadConfig(paths.configFile).spaces.dev?.space).toBe("spaces/refreshed");
+    expect(loadConfig(paths.configFile).defaultSpace).toBe("dev");
+    expect(api.calls).toHaveLength(2);
+  });
+
+  test("spaces --default는 예시 기본 방을 바꾸고 기존 별칭도 대상 없이 선택하며 다른 방 덮어쓰기는 거절한다", async () => {
+    const paths = fixture(false);
+    const original = { defaultSpace: "team", sendTag: false, extra: "유지", spaces: {
+      team: { space: "spaces/SPACE_ID" }, tn: { space: SPACE, webhookUrl: "https://example.test/fixture-hook", custom: true },
+    } };
+    writeFileSync(paths.configFile, JSON.stringify(original));
+    const db = openDatabase(paths.dbPath);
+    cacheSpaces(db, [named("other", "다른 방")], NOW.toISOString());
+    db.close();
+    const api = mockFetch(() => { throw new Error("네트워크 금지"); });
+    const output: string[] = [], errors: string[] = [];
+    const dependencies = { paths, now: NOW, env: {}, fetcher: api.fetcher, stdout: (text: string) => output.push(text), stderr: (text: string) => errors.push(text) };
+    expect(await main(["spaces", "다른 방", "--save", "dev", "--default"], dependencies)).toBe(0);
+    expect(loadConfig(paths.configFile).defaultSpace).toBe("dev");
+    const added = { ...original, spaces: { ...original.spaces, dev: { space: "spaces/other" } } };
+    expect(JSON.parse(readFileSync(paths.configFile, "utf8"))).toEqual({ ...added, defaultSpace: "dev" });
+    expect(await main(["spaces", "--save", "tn", "--default"], dependencies)).toBe(0);
+    expect(output.at(-1)).toContain(SPACE);
+    expect(output.at(-1)).toContain("tn: 기본 방으로 지정했습니다");
+    expect(JSON.parse(readFileSync(paths.configFile, "utf8"))).toEqual({ ...added, defaultSpace: "tn" });
+    const before = readFileSync(paths.configFile, "utf8");
+    expect(await main(["spaces", "spaces/other", "--save", "tn", "--default"], dependencies)).toBe(1);
+    expect(errors.join("\n")).toContain("덮어쓰지");
+    expect(readFileSync(paths.configFile, "utf8")).toBe(before);
+    expect(api.calls).toHaveLength(0);
+  });
+
+  test("send --dry-run --default는 새/기존 별칭·기본 방·권한을 바꾸지 않는다", async () => {
+    const paths = fixture(false);
+    const original = { defaultSpace: "tn", sendTag: false, spaces: { tn: { space: SPACE }, dev: { space: "spaces/dev", custom: "보존" } } };
+    const before = JSON.stringify(original);
+    writeFileSync(paths.configFile, before);
+    chmodSync(paths.configFile, 0o644);
+    const api = mockFetch(() => { throw new Error("네트워크 금지"); });
+    const output: string[] = [];
+    const dependencies = { paths, env: {}, fetcher: api.fetcher, stdin: () => "초안", stdout: (text: string) => output.push(text), stderr: () => {} };
+    for (const args of [["send", "spaces/new", "--save", "new"], ["send", "--save", "dev"]]) {
+      expect(await main([...args, "--default", "--dry-run"], dependencies)).toBe(0);
+      expect(output.at(-1)).toContain("기본 방으로 지정할 예정");
+      expect(readFileSync(paths.configFile, "utf8")).toBe(before);
+      expect(statSync(paths.configFile).mode & 0o777).toBe(0o644);
+    }
+    expect(output.at(-1)).toContain("spaces/dev");
+    expect(api.calls).toHaveLength(0);
+    expect(existsSync(paths.dbPath)).toBe(false);
+  });
+
+  test("--default 단독·중복·미지원 명령은 인자 오류이며 잘못된 기존 설정은 덮어쓰지 않는다", async () => {
+    const paths = fixture(false);
+    writeFileSync(paths.configFile, "깨진 기존 설정");
+    const api = mockFetch(() => { throw new Error("네트워크 금지"); });
+    const errors: string[] = [];
+    const dependencies = { paths, fetcher: api.fetcher, stdout: () => {}, stderr: (text: string) => errors.push(text) };
+    for (const command of ["spaces", "collect", "fetch", "send", "wait"] as const) {
+      expect(await main([command, "--default"], dependencies)).toBe(1);
+      expect(errors.at(-1)).toContain("--default는 --save <별칭>과 함께");
+      expect(() => parseArguments(command, ["--save", "dev", "--default", "--default"])).toThrow();
+    }
+    for (const command of ["auth", "doctor", "download", "react"] as const) {
+      expect(() => parseArguments(command, ["--save", "dev", "--default"])).toThrow();
+    }
+    expect(await main(["spaces", "spaces/new", "--save", "dev", "--default"], dependencies)).toBe(1);
+    expect(readFileSync(paths.configFile, "utf8")).toBe("깨진 기존 설정");
+    expect(api.calls).toHaveLength(0);
+    expect(existsSync(paths.dbPath)).toBe(false);
+  });
+
   test("미등록 방도 fetch/collect/send가 같은 해석을 쓰며 save가 없으면 설정을 바꾸지 않는다", async () => {
     for (const command of ["fetch", "collect", "send"] as const) {
       const paths = fixture();
@@ -168,6 +296,40 @@ describe("공통 대상 해석", () => {
       expect(output[0]).toStartWith("[대상] Adhoc Room (SPACE, spaces/adhoc)");
       expect(readFileSync(paths.configFile, "utf8")).toBe(before);
     }
+  });
+
+  test("설정 파일이 없으면 명시한 방의 첫 --save가 기본 별칭과 0600 설정을 만든다", async () => {
+    const paths = fixture(false);
+    unlinkSync(paths.configFile);
+    const db = openDatabase(paths.dbPath);
+    cacheSpaces(db, [named("first", "첫 방")], NOW.toISOString());
+    db.close();
+    const api = mockFetch(() => { throw new Error("네트워크 금지"); });
+    expect(await main(["fetch", "첫 방", "--save", "dev", "--no-collect"], {
+      paths, now: NOW, fetcher: api.fetcher, stdout: () => {}, stderr: () => {},
+    })).toBe(0);
+    expect(loadConfig(paths.configFile)).toEqual({ defaultSpace: "dev", spaces: { dev: { space: "spaces/first" } }, sendTag: true });
+    expect(statSync(paths.configFile).mode & 0o777).toBe(0o600);
+    expect(api.calls).toHaveLength(0);
+    expect(() => saveAlias(paths.configFile, "dev", "spaces/other")).toThrow("덮어쓰지");
+  });
+
+  test("설정 없는 --save 미리보기는 파일을 만들지 않고 대상 생략은 API 전에 거절한다", async () => {
+    const paths = fixture(false);
+    unlinkSync(paths.configFile);
+    const api = mockFetch(() => { throw new Error("네트워크 금지"); });
+    const output: string[] = [];
+    const dependencies = { paths, fetcher: api.fetcher, env: {}, stdin: () => "초안", stdout: (text: string) => output.push(text), stderr: () => {} };
+    expect(await main(["send", "spaces/preview", "--save", "dev", "--dry-run"], dependencies)).toBe(0);
+    expect(output.join("\n")).toContain("dev: 저장할 예정");
+    expect(existsSync(paths.configFile)).toBe(false);
+    expect(existsSync(paths.dbPath)).toBe(false);
+    expect(await main(["send", "spaces/preview", "--save", "dev", "--default", "--dry-run"], dependencies)).toBe(0);
+    expect(output.at(-1)).toContain("dev: 기본 방으로 지정할 예정");
+    expect(existsSync(paths.configFile)).toBe(false);
+    expect(await main(["fetch", "--save", "dev"], dependencies)).toBe(1);
+    expect(api.calls).toHaveLength(0);
+    expect(existsSync(paths.configFile)).toBe(false);
   });
 
   test("위치 인자+DM·중복 옵션은 인자 오류이며 미리보기에는 대상과 본문이 나온다", async () => {

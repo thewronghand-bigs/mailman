@@ -1,6 +1,6 @@
 // 대상 해석은 모든 명령에서 공유한다. 후보가 여러 개면 추측하지 않는다.
 import type { Database } from "bun:sqlite";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import type { ChatClient, ChatSpace } from "./chat";
 import { errorMessage, isRecord, MailmanError } from "./errors";
 import { writePrivateFile } from "./private-file";
@@ -152,15 +152,21 @@ export async function resolveTarget(config: MailmanConfig, db: Database | undefi
 
 function cachedSpacesIfPresent(db?: Database): ChatSpace[] { return db ? cachedSpaces(db) : []; }
 
-export function saveAlias(configFile: string, alias: string, space: string, dryRun = false): void {
+export function saveAlias(configFile: string, alias: string, space: string, options: { dryRun?: boolean; makeDefault?: boolean } = {}): void {
   requireName(alias, "--save");
   validateSpace(space);
   // 최신 파일을 다시 읽어 다른 필드와 이미 저장된 별칭을 보존한다.
-  loadConfig(configFile);
-  const raw: unknown = JSON.parse(readFileSync(configFile, "utf8"));
+  const exists = existsSync(configFile);
+  const config = exists ? loadConfig(configFile) : undefined;
+  // 설정이 없을 때만 첫 별칭을 기본 방으로 만든다. 기존 파일의 기본 방과 다른 필드는 보존한다.
+  const raw: unknown = exists ? JSON.parse(readFileSync(configFile, "utf8")) : { defaultSpace: alias, spaces: {} };
   if (!isRecord(raw) || !isRecord(raw.spaces)) throw new MailmanError("설정 파일의 spaces를 확인하세요.");
-  if (Object.hasOwn(raw.spaces, alias)) throw new MailmanError(`이미 등록된 별칭입니다: ${alias}. --save는 덮어쓰지 않습니다.`);
-  if (dryRun) return;
-  Object.defineProperty(raw.spaces, alias, { value: { space }, enumerable: true, configurable: true, writable: true });
+  const registered = Object.hasOwn(raw.spaces, alias);
+  if (registered && (!options.makeDefault || config?.spaces[alias]?.space !== space)) {
+    throw new MailmanError(`이미 등록된 별칭입니다: ${alias}. --save는 덮어쓰지 않습니다. --default는 같은 방의 별칭만 기본 방으로 지정할 수 있습니다.`);
+  }
+  if (options.dryRun) return;
+  if (!registered) Object.defineProperty(raw.spaces, alias, { value: { space }, enumerable: true, configurable: true, writable: true });
+  if (options.makeDefault) raw.defaultSpace = alias;
   writePrivateFile(configFile, JSON.stringify(raw, null, 2) + "\n", ".mailman-config-", "설정 파일에 별칭을 저장할 수 없습니다.");
 }

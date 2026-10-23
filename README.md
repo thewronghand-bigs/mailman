@@ -2,7 +2,7 @@
   <img width="261" height="261" alt="mailman" src="https://github.com/user-attachments/assets/b913ae4d-6ab5-4f7a-b655-7acd3865e33d" />
 </p>
 
-<h1 align="center">Mailman v2.2</h1>
+<h1 align="center">Mailman v2.3</h1>
 
 <p align="center"><i>소통을 딸깍하세요.</i></p>
 
@@ -29,9 +29,12 @@ echo 'export PATH="$HOME/.claude/bin:$PATH"' >> ~/.zshrc   # PATH 추가 (zsh)
 ```bash
 mailman auth --client ~/Downloads/client_secret_XXXX.json   # 최초 로그인 (클라이언트 등록)
 mailman auth                                                # 재로그인
+mailman doctor                                              # 설정·인증·Chat API 점검, 해결 단계 안내
 mailman spaces                                             # 내가 속한 스페이스 이름·종류·ID (캐시)
 mailman spaces '개발 팀' --refresh                          # 이름 검색, 목록 갱신
-mailman fetch '개발 팀' --save dev                          # 이름으로 조회하고 별칭 저장
+mailman spaces '개발 팀' --save dev                         # 별칭 저장 (첫 별칭이 기본 방)
+mailman spaces --save dev --default                        # 기존 별칭을 기본 방으로 변경
+mailman fetch dev                                          # 저장한 별칭으로 조회
 mailman fetch --dm colleague@example.test                   # 기존 1:1 DM 조회
 mailman collect team                                        # 수집만
 mailman collect team --deep                                 # 최근 30일 백필 수집
@@ -62,6 +65,8 @@ mailman --version
 
 config에 없는 방도 해당 호출에서 사용할 수 있습니다. `--save <새 별칭>`을 붙일 때만 별칭을 저장하며, 기존 별칭은 덮어쓰지 않습니다. 출력 첫 줄의 `[대상] 이름 (종류, spaces/...)`를 확인하세요. 별칭·리터럴의 표시 정보가 캐시에 없으면 입력 이름과 `SPACE_TYPE_UNSPECIFIED`를 표시합니다. `mailman spaces --refresh`로 표시 정보를 채울 수 있습니다.
 
+설치기는 설정 파일을 만들지 않습니다. 첫 `--save`가 0600 설정 파일을 만들며 **처음 저장한 별칭이 기본 방**입니다. 대상을 생략하면 이 방을 사용합니다. **바꾸려면 `--save <별칭> --default`**를 붙이세요. 새 대상을 저장하면서 기본으로 정하거나 `mailman spaces --save dev --default`로 기존 별칭의 기본 지정만 바꿀 수 있습니다. 기존 별칭의 `space` 값과 다른 필드는 보존하며, 다른 방으로 덮어쓰는 요청은 거절합니다. `config.example.json`은 문서 참고용입니다.
+
 `wait`는 실행 시각부터, `send --wait`는 방금 보낸 메시지의 생성 시각부터 내 메시지를 제외한 답장을 기다립니다. 기본값은 `--quiet 60s --timeout 30m --interval 15s`입니다. 짧은 답장이 이어지면 quiet를 다시 세고, 조용해졌을 때 한 묶음으로 보여 줍니다. 첫 답장 후 최대 10분과 전체 timeout 중 빠른 시점에도 묶음을 반환합니다. `--thread`·`--from`으로 범위를 좁힐 수 있습니다. 대기 전 안 읽은 다른 사람 메시지는 먼저 표시합니다. 이 과거 메시지와 답장 묶음은 누락 없이 모두 표시하므로 일반 fetch의 200건 상한을 적용하지 않습니다.
 
 대기 출력이 성공하면 실제 보여 준 메시지까지 seen을 전진합니다. `--thread`·`--from`, 대기 오류·출력 실패·중단에서는 seen을 유지합니다. 답장이 없으면 `답장 없음`과 **exit 4**입니다. **`send --wait`가 exit 5면 전송은 완료됨 — 재전송 금지**입니다. 전송 완료 정보는 먼저 출력하며 이후 대기 오류·출력 실패·시그널은 exit 5입니다. 전송 요청 중 중단은 전송 여부가 불확실하므로 Chat에서 확인 후 재전송 여부를 판단합니다. 단독 `wait`의 Ctrl-C/SIGTERM은 **130/143**입니다. Claude Code는 승인 후 `send --wait`를 Bash `run_in_background`로 실행하고 완료 알림에서 답장 묶음을 읽습니다. Codex는 완료 알림이 없으므로 `--timeout 2m`처럼 짧게 잡아 블로킹 실행합니다.
@@ -72,31 +77,17 @@ config에 없는 방도 해당 호출에서 사용할 수 있습니다. `--save 
 
 ## 설치와 설정
 
-준비물은 macOS(Apple Silicon/Intel)와 Google Chat에 접근할 회사(Workspace) 계정입니다. 배포본은 `bun build --compile`로 만든 단일 실행 파일이라 bun·Node.js가 필요 없습니다.
+준비물은 macOS(Apple Silicon/Intel)와 회사 Google Workspace 계정입니다. 직접 프로젝트를 만들 때는 개인 Gmail도 필요합니다. 배포본은 단일 실행 파일이라 bun·Node.js가 필요 없습니다.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/install.sh | bash
 ```
 
-1. 설치 스크립트가 최신 릴리스의 `mailman-darwin-<arch>`를 `~/.claude/bin/mailman`에, `/mailman`·`/mailman-deep` 커맨드를 `~/.claude/commands/`에 설치하고 설정 예시를 `~/.claude/mailman/config.json`에 만듭니다. 필요한 파일을 모두 받아 검증한 뒤 한꺼번에 설치하므로, 다운로드가 하나라도 실패하면 기존 설치는 그대로입니다. 실행 파일은 직전 1개만 `mailman.bak`으로, 커맨드·스킬 문서는 `.bak.<타임스탬프>`로 백업합니다. Codex 스킬도 설치하려면 `MAILMAN_TARGET=all`(또는 `codex`)을 붙입니다.
-2. **OAuth 클라이언트는 사용자마다 직접 만듭니다.** [설정 가이드](https://thewronghand-bigs.github.io/mailman/setup)를 따라 본인 GCP 프로젝트에 데스크톱 앱 OAuth 클라이언트를 만들고 JSON을 받습니다. 실행 파일·레포·릴리스에는 client id/secret이 없습니다.
-3. `~/.claude/bin/mailman auth --client <받은 JSON>`으로 로그인합니다. JSON은 검증 후 `~/.claude/secrets/mailman-oauth.json`에 0600으로 복사됩니다.
-4. `mailman spaces`로 이름을 확인하고 `mailman fetch '표시 이름' --save <새 별칭>`으로 조회·등록합니다. 이름이나 DM을 직접 쓰면 등록을 생략할 수 있습니다. 기본 별칭은 설정의 `defaultSpace`로 정합니다.
+**A. 설정을 마친 동료에게 클라이언트 JSON을 받았다면 [설정 가이드 8단계부터(약 5분)](https://thewronghand-bigs.github.io/mailman/setup#step-8), B. 처음부터 혼자 설정한다면 [1단계부터(약 20분)](https://thewronghand-bigs.github.io/mailman/setup#step-1)** 진행하세요.
 
-```json
-{
-  "defaultSpace": "team",
-  "sendTag": true,
-  "spaces": {
-    "team": {
-      "space": "spaces/SPACE_ID",
-      "webhookUrl": ""
-    }
-  }
-}
-```
+이어서 `mailman doctor`로 점검하고, `mailman spaces '검색어' --save dev`로 방을 등록하세요. 후보가 여러 개면 표시 이름으로 검색 범위를 좁힙니다. 처음 저장한 별칭이 기본 방이며 바꾸려면 `--default`를 붙입니다. 설정 파일을 직접 편집할 필요가 없습니다.
 
-`space`는 Chat API의 리소스 이름입니다. 위 JSON은 수동 설정 형식이며 `--save`를 쓰면 이 필드가 자동으로 채워집니다. 설치 예시의 `team`을 교체하려면 설정 파일을 직접 편집합니다(`--save`는 기존 별칭 교체를 거절). `webhookUrl`은 선택 사항이며 카드 전송에만 씁니다. `sendTag`도 선택 사항이며(기본 `true`) `false`로 두면 `mailman send`가 전송 태그를 붙이지 않습니다([인증과 전송](#인증과-전송) 참고). 자세한 내용은 [INSTALL.md](INSTALL.md)를 참고하세요.
+오류가 나면 먼저 `mailman doctor`를 실행하세요. 실패한 항목에서 가이드의 해결 단계로 바로 이동할 수 있습니다. 실패는 exit 1, 경고만 있으면 exit 0이며, 설정·권한·DB를 자동 변경하지 않습니다. Codex 설치·업데이트·백업과 경로 설정은 [INSTALL.md](INSTALL.md)를 참고하세요.
 
 ### 개인 컨벤션 (`local.md`)
 
@@ -182,7 +173,7 @@ network_access = true
 
 본문이 있으면 태그+본문, 비어 있고 첨부만 있으면 태그만 보냅니다. 태그를 끄면 텍스트 없이 첨부만 보냅니다. TTY에서는 본문 입력 없이 첨부만 보낼 수 있고 파이프에서는 `< /dev/null`로 빈 본문을 지정할 수 있습니다. `--thread`·`--wait`·`--agent`·`--no-tag`·`--dry-run`과 함께 쓸 수 있으며 기존 옵션 간 배타 규칙은 유지됩니다. `--dry-run`은 업로드하지 않고 파일 경로·이름·크기를 표시하며 성공 출력에는 첨부 이름 목록과 실제 경로가 나옵니다.
 
-Claude/Codex는 사용자가 지정한 파일만 첨부하며 경로·이름·크기를 전송 미리보기에 포함해 승인받습니다. `.env`·키·토큰·자격증명 파일은 첨부하지 않고 경고합니다. 핸드오버 md 작성·전송 요청은 먼저 파일로 쓴 뒤 그 경로를 미리보기에 넣어 승인받고 첨부합니다.
+Claude/Codex는 사용자가 지정한 파일만 첨부하며 경로·이름·크기를 전송 미리보기에 포함해 승인받습니다. `.env`·키·토큰·자격증명 파일은 첨부하지 않고 경고하며, 이 제한은 완화할 수 없습니다. 동료용 OAuth 클라이언트 JSON도 **mailman으로 보내지 말고 사내 메신저에서 직접 첨부해 DM으로 보내세요**([전달 절차](https://thewronghand-bigs.github.io/mailman/setup#colleague-client)). 핸드오버 md 작성·전송 요청은 먼저 파일로 쓴 뒤 그 경로를 미리보기에 넣어 승인받고 첨부합니다.
 
 ## 첨부와 리액션
 

@@ -49,6 +49,8 @@ DM과 단발은 시각·발신자·본문·한 줄 `message name`의 시간순 �
 
 기존 DM은 `--dm colleague@example.test`, `--dm '사람 이름'`, `--dm users/USER_ID`로 찾는다. 사람 이름은 수집된 메시지의 발신자 기록에서 유일해야 한다. 기록이 없거나 동명이인이면 이메일로 구분한다. 새 DM은 만들지 않는다. 위치 인자와 `--dm`은 함께 쓰지 않는다. `--save <새 별칭>`을 명시할 때만 config에 추가하며 기존 별칭은 덮어쓰지 않는다.
 
+설치기는 설정 파일을 만들지 않는다. 첫 `--save`가 0600 설정 파일을 만들며 처음 저장한 별칭이 기본 방이다. `spaces '검색어' --save <별칭>`으로 조회 없이 저장할 수도 있다. 기본 방 변경을 요청하면 `--save <별칭> --default`를 쓴다. `spaces --save <기존 별칭> --default`는 기존 별칭의 기본 지정만 바꾸며 space·추가 필드는 보존한다. 다른 방으로 덮어쓰는 요청은 거절한다. `send --dry-run`은 기본 방도 변경하지 않는다.
+
 출력 첫 줄은 `[대상] 이름 (종류, spaces/...)`다. 별칭/리터럴에 `SPACE_TYPE_UNSPECIFIED`가 나오면 `spaces --refresh`로 실제 표시 정보를 확인한다. 전송 초안에는 해석된 이름·종류·ID를 반드시 표시한다. `send --dry-run`은 본문을 stdin으로 받아 대상·태그 적용 본문을 미리 보여 주며 전송하지 않는다.
 
 ## 보고 기준
@@ -72,6 +74,7 @@ DM과 단발은 시각·발신자·본문·한 줄 `message name`의 시간순 �
 
 ## 인증
 
+- 오류가 나면 먼저 `~/.claude/bin/mailman doctor`를 실행해 결과를 사용자에게 보여 준다. 위 샌드박스 실행 규칙을 따른다.
 - 최초 인증: `~/.claude/bin/mailman auth --client <다운로드한 client_secret JSON>` ([설정 가이드](https://thewronghand-bigs.github.io/mailman/setup)).
 - 토큰 없음(exit 2)이나 `invalid_grant`(exit 3): `~/.claude/bin/mailman auth`로 다시 인증한다.
 - 인증은 브라우저 로그인이 필요하므로 사용자에게 직접 실행해 달라고 안내한다. 토큰·client secret·웹훅 URL은 출력하지 않는다.

@@ -13,8 +13,9 @@ permalink: /
 - **답장 대기**: 짧게 나누어 온 답장을 조용해진 뒤 한 묶음으로 읽습니다.
 - **첨부**: 업로드 첨부를 로컬에 저장하고 작은 텍스트 첨부를 펼쳐 읽습니다. Drive 첨부는 링크만 안내합니다.
 - **리액션**: 작업 관련 메시지를 읽고 보고하면 👀, 실제 반영 완료 뒤 사용자 승인으로 ✅를 답니다.
+- **설정 점검**: `mailman doctor`가 설정·인증·Chat API 접근을 확인하고 해결 단계로 안내합니다.
 - **로컬 저장**: 메시지·토큰·로그는 모두 사용자 기기에만 저장됩니다. 별도 서버가 없습니다.
-- **사용자별 OAuth 클라이언트**: 각 사용자가 자기 Google Cloud 프로젝트에 OAuth 클라이언트를 만들어 씁니다. 배포물에는 어떤 클라이언트 정보도 들어 있지 않습니다.
+- **사용자별 OAuth 클라이언트**: 본인 프로젝트에서 만들거나, 설정을 마친 동료의 프로젝트에서 사람마다 따로 발급받습니다. 배포물에는 어떤 클라이언트 정보도 들어 있지 않습니다.
 
 ## 설치
 
@@ -32,15 +33,9 @@ curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/inst
 
 ## 시작하기
 
-1. [설정 가이드](setup.md)를 따라 본인 Google Cloud 프로젝트에 데스크톱 앱 OAuth 클라이언트를 만듭니다.
-2. 받은 JSON으로 로그인합니다.
+**A. 설정을 마친 동료에게 클라이언트 JSON을 받았다면 [8단계부터(약 5분)](setup.md#step-8), B. 처음부터 혼자 설정한다면 [1단계부터(약 20분)](setup.md#step-1)** 진행하세요. 회사 Google Workspace 계정이 필요하며, B 경로는 개인 Gmail도 준비합니다. 인증 후 `mailman doctor`로 확인합니다.
 
-   ```bash
-   ~/.claude/bin/mailman auth --client ~/Downloads/client_secret_XXXX.json
-   ```
-
-3. `mailman spaces`로 방 이름을 확인하고 `mailman fetch '표시 이름' --save <새 별칭>`으로 조회·등록합니다. `--dm colleague@example.test`로 기존 DM을 직접 지정해도 됩니다.
-4. Claude Code에서 `/mailman`을, Codex에서 `$mailman`을 실행합니다. Codex 샌드박스 설정은 [README](https://github.com/thewronghand-bigs/mailman#codex에서-쓰기)를 참고하세요.
+가이드 마지막 단계에서 `mailman spaces '검색어' --save <별칭>`으로 방을 저장하고 Claude Code `/mailman <별칭>` 또는 Codex `$mailman`으로 조회합니다. 설치기는 설정 파일을 만들지 않으며 첫 `--save`가 0600 설정 파일을 만듭니다. 처음 저장한 별칭이 기본 방이고 바꾸려면 `--save <별칭> --default`를 사용합니다. 기존 별칭의 방 값은 덮어쓰지 않습니다. 오류가 나면 먼저 `mailman doctor`의 해결 링크를 확인하세요. Codex 샌드박스 설정은 [README](https://github.com/thewronghand-bigs/mailman#codex에서-쓰기)를 참고하세요.
 
 ## 명령
 
@@ -48,11 +43,12 @@ curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/inst
 
 ```text
 mailman auth [--client <client_secret.json>]
-mailman spaces [검색어] [--refresh]
-mailman collect [대상] [--dm <사람>] [--save <별칭>] [--deep]
-mailman fetch [대상] [--dm <사람>] [--save <별칭>] [--since 24h|3d|YYYY-MM-DD] [--only bot|human] [--no-collect] [--deep] [--with-attachments]
-mailman send [대상] [--dm <사람>] [--save <별칭>] [--attach <파일> ...] [--thread spaces/.../threads/...] [--agent claude|codex | --no-tag] [--dry-run | --wait] < 본문.txt
-mailman wait [대상] [--dm <사람>] [--save <별칭>] [--thread spaces/.../threads/...] [--from <사람>] [--quiet 60s] [--timeout 30m] [--interval 15s]
+mailman doctor
+mailman spaces [검색어] [--refresh] [--save <별칭>] [--default]
+mailman collect [대상] [--dm <사람>] [--save <별칭>] [--default] [--deep]
+mailman fetch [대상] [--dm <사람>] [--save <별칭>] [--default] [--since 24h|3d|YYYY-MM-DD] [--only bot|human] [--no-collect] [--deep] [--with-attachments]
+mailman send [대상] [--dm <사람>] [--save <별칭>] [--default] [--attach <파일> ...] [--thread spaces/.../threads/...] [--agent claude|codex | --no-tag] [--dry-run | --wait] < 본문.txt
+mailman wait [대상] [--dm <사람>] [--save <별칭>] [--default] [--thread spaces/.../threads/...] [--from <사람>] [--quiet 60s] [--timeout 30m] [--interval 15s]
 mailman download <메시지 name> [--out <디렉터리>] [--print]
 mailman react <메시지 name> <👀|✅>
 mailman --help | --version

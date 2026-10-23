@@ -1,6 +1,6 @@
-# claude-mailman v2.2
+# claude-mailman v2.3
 
-Google Chat API를 사용자 OAuth로 호출해 스페이스 메시지를 SQLite에 저장하고, Claude Code 슬래시 커맨드·Codex 스킬 또는 CLI로 조회/전송하는 파이프라인. 배포는 `bun build --compile` 단일 실행 파일(`~/.claude/bin/mailman`)이며, OAuth 클라이언트는 사용자마다 자기 GCP 프로젝트에 만든다(BYO).
+Google Chat API를 사용자 OAuth로 호출해 스페이스 메시지를 SQLite에 저장하고, Claude Code 슬래시 커맨드·Codex 스킬 또는 CLI로 조회/전송하는 파이프라인. 배포는 `bun build --compile` 단일 실행 파일(`~/.claude/bin/mailman`)이며, OAuth 클라이언트는 본인 프로젝트에서 만들거나 설정을 마친 동료의 프로젝트에서 사람마다 따로 발급받는다.
 
 ## 구조
 
@@ -10,6 +10,7 @@ scripts/mailman/
 ├─ resolve.ts       # 공통 대상·사람 이름 해석, 목록 캐시, 별칭 저장
 ├─ private-file.ts  # 설정·인증정보 0600 원자 쓰기
 ├─ auth.ts          # loopback + PKCE OAuth, refresh token 저장/갱신
+├─ doctor.ts        # 파일·권한·설정·인증·Chat API 진단과 설정 가이드 단계 안내
 ├─ chat.ts          # Chat API 목록/메시지 조회·media 다운로드·텍스트/리액션 전송
 ├─ download.ts      # 첨부 저장·재사용·텍스트 판정·조회 펼치기
 ├─ upload.ts        # 전송 파일 전체 검증·multipart 스트리밍·업로드 실패 안내
@@ -24,7 +25,7 @@ scripts/mailman/
 ├─ fetch.ts         # seen 이후 조회 → 스레드/이전 맥락 출력 → seen 저장
 ├─ send.ts          # 태그 접두사/답글을 붙인 전송 본문
 ├─ wait.ts          # 답장 폴링, quiet 묶음, 시그널·seen 처리
-├─ cli.ts           # 단일 진입점: mailman <auth|spaces|collect|fetch|send|wait|download|react>, --help, --version
+├─ cli.ts           # 단일 진입점: mailman <auth|doctor|spaces|collect|fetch|send|wait|download|react>, --help, --version
 ├─ mailman-dev      # 개발 실행기: bun 탐색 후 cli.ts 실행 (install.sh --dev가 링크)
 ├─ config.example.json
 ├─ tests/           # 실제 네트워크를 차단한 bun test
@@ -37,6 +38,7 @@ scripts/mailman/
 - `commands/mailman.md`: `/mailman` 증분 수집/조회, 승인 후 전송 절차.
 - `commands/mailman-deep.md`: `/mailman-deep` 최근 30일 백필 재수집.
 - `codex-skills/mailman/SKILL.md`: Codex `$mailman` 스킬. 커맨드 문서와 같은 절차(조회·보고 기준·승인 전송·카드 웹훅)를 Claude 전용 문법 없이 쓰고 샌드박스 밖 실행을 안내한다. 커맨드 절차를 바꾸면 이 파일도 같이 고친다.
+- 설치기는 설정 파일을 만들거나 수정하지 않는다. 첫 `--save`가 0600 설정 파일과 기본 방을 만들며 `config.example.json`은 문서 참고용이다. `spaces --save`도 공통 대상 해석을 쓴다. `--save <별칭> --default`는 새 별칭 저장과 기본 방 지정을 함께 하거나 같은 방의 기존 별칭의 기본 지정만 바꾸며 space·추가 필드는 보존한다. `spaces --save <기존 별칭> --default`는 대상을 생략해도 그 별칭을 선택한다. `--default` 단독은 인자 오류이며 `send --dry-run`은 기본 방도 변경하지 않는다.
 - 개인 취향(카드 스타일·말투)은 레포에 두지 않는다. 커맨드·스킬은 `$MAILMAN_HOME/mailman/local.md`가 있으면 먼저 읽고 우선해 따른다. 👀 자동 조건도 바꿀 수 있지만 ✅ 승인·전송 승인·웹훅 URL 비노출은 완화할 수 없다.
 - `scripts/mailman-legacy/`: 기존 Playwright/snapshot 구현 보존. v2에서 사용하지 않음.
 
@@ -66,6 +68,7 @@ scripts/mailman/
 - 설정/환경변수 해석은 `runtime.ts`에 집중한다.
 - 레포·실행 파일·릴리스에 client id/secret, 토큰, webhook URL, 실제 스페이스 ID를 넣지 않는다(공개 레포). 토큰, client secret, webhook URL을 출력하지 않는다.
 - `mailman auth --client <파일>`은 `installed` 형식을 검증해 클라이언트 파일 경로로 0600 복사 후 로그인한다. 클라이언트 파일이 없으면 설정 가이드 URL(`runtime.ts`의 `SETUP_GUIDE_URL`)을 안내하고 exit 2.
+- `mailman doctor`는 설정·인증·Chat API 접근을 순서대로 진단하고 가이드 단계 링크를 표시한다. 실패는 exit 1, 경고만 있으면 0이며 의존 단계는 건너뛴다. 파일·권한·DB를 변경하지 않고 API는 `GET /v1/spaces?pageSize=1`만 조회한다. 원문 오류·인증정보는 출력하지 않는다.
 - access token은 메모리에서만 쓰며 매 실행마다 refresh한다. 토큰 없음은 exit 2, `invalid_grant`는 재인증 안내와 exit 3.
 - OAuth 요청/허용 스코프는 기존 4개+openid와 `chat.messages.reactions.create` 여섯 개다. 필수 검사는 `REQUIRED_SCOPES`의 기존 다섯만 유지한다. 리액션 권한 없는 토큰은 react만 exit 2와 `mailman auth` 재실행을 안내하고 나머지 명령은 정상 동작한다. 카드 전송은 기존 웹훅 curl 절차를 쓴다.
 - 기본/지정 별칭 또는 이름·리터럴·DM으로 선택한 방의 모든 메시지를 저장하고 조회에서도 모든 발신자를 포함한다. 미등록 방은 해당 호출에서만 사용한다. 무엇이 작업에 중요한지는 출력을 읽는 Claude가 판단한다.

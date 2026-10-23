@@ -126,22 +126,6 @@ move_aside_codex_skill_dir() {
   fi
 }
 
-# 설정 파일이 없을 때만 예시를 만든다. webhookUrl이 들어갈 수 있어 0600으로 둔다.
-create_config_example() {
-  local example="$1"
-  if [ -e "$CONFIG_FILE" ]; then
-    echo "[mailman] 설정 파일이 이미 있습니다. 덮어쓰지 않았습니다: $CONFIG_FILE"
-    return
-  fi
-  mkdir -p "$(dirname "$CONFIG_FILE")"
-  CURRENT_TEMP="$(mktemp "$(dirname "$CONFIG_FILE")/.config.json.XXXXXX")"
-  cp "$example" "$CURRENT_TEMP"
-  chmod 600 "$CURRENT_TEMP"
-  mv "$CURRENT_TEMP" "$CONFIG_FILE"
-  CURRENT_TEMP=""
-  echo "[mailman] 설정 예시를 만들었습니다: $CONFIG_FILE"
-}
-
 detect_arch() {
   if [ "$(uname -s)" != "Darwin" ]; then
     echo "[mailman] macOS만 지원합니다." >&2
@@ -214,10 +198,6 @@ install_release() {
     download "$raw/codex-skills/mailman/SKILL.md" "$STAGE_DIR/SKILL.md" "codex-skills/mailman/SKILL.md"
     check_markdown "$STAGE_DIR/SKILL.md" "codex-skills/mailman/SKILL.md"
   fi
-  if [ ! -e "$CONFIG_FILE" ]; then
-    download "$raw/scripts/mailman/config.example.json" "$STAGE_DIR/config.example.json" "scripts/mailman/config.example.json"
-  fi
-
   # 2. 모두 받은 뒤 한꺼번에 설치한다. 각 파일은 같은 디렉터리의 임시 파일에서 mv 한 번으로 교체된다.
   install_file "$STAGE_DIR/mailman" "$BIN_FILE" "$BIN_BACKUP" 755
   if wants_claude; then
@@ -231,11 +211,6 @@ install_release() {
       move_aside_codex_skill_dir
     fi
     install_file "$STAGE_DIR/SKILL.md" "$CODEX_SKILL_DIR/SKILL.md" "$CODEX_SKILL_DIR/SKILL.md.bak.$TIMESTAMP" 644
-  fi
-  if [ -f "$STAGE_DIR/config.example.json" ]; then
-    create_config_example "$STAGE_DIR/config.example.json"
-  else
-    echo "[mailman] 설정 파일이 이미 있습니다. 덮어쓰지 않았습니다: $CONFIG_FILE"
   fi
 }
 
@@ -271,8 +246,6 @@ install_dev() {
     fi
   fi
 
-  create_config_example "$repo_dir/scripts/mailman/config.example.json"
-
   if ! (source "$dev_runner" && mailman_setup_path) >/dev/null 2>&1; then
     echo "[mailman] 경고: bun을 찾을 수 없습니다. 개발 설치는 bun이 필요합니다 (https://bun.sh)."
   fi
@@ -282,14 +255,17 @@ print_next_steps() {
   echo ""
   echo "[mailman] 설치 완료. 다음 단계:"
   echo ""
-  echo "  1. 설정 가이드를 따라 본인 GCP 프로젝트에 데스크톱 앱 OAuth 클라이언트를 만들고 JSON을 받습니다."
+  echo "  1. 설정을 마친 동료에게 본인용 클라이언트 JSON을 받거나, 가이드를 따라 직접 만듭니다."
   echo "     $SETUP_GUIDE_URL"
   echo ""
   echo "  2. 받은 JSON으로 로그인합니다 (클라이언트 파일은 $CLIENT_FILE 에 0600으로 복사됩니다)."
   echo "     $BIN_FILE auth --client ~/Downloads/client_secret_XXXX.json"
   echo ""
-  echo "  3. 설정 파일에 조회할 스페이스를 추가합니다."
-  echo "     $CONFIG_FILE"
+  echo "  3. 설정을 점검하고 방을 찾아 별칭을 저장합니다."
+  echo "     $BIN_FILE doctor"
+  echo "     $BIN_FILE spaces '검색어' --save dev"
+  echo "     설치 시 설정 파일은 만들지 않습니다. 첫 --save가 0600 설정 파일을 만들고 그 별칭을 기본 방으로 정합니다."
+  echo "     기본 방 변경: $BIN_FILE spaces --save <기존 별칭> --default"
   echo ""
   local step=4
   if wants_claude; then

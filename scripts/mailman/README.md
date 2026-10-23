@@ -1,4 +1,4 @@
-# mailman v2.2 런타임
+# mailman v2.3 런타임
 
 Google Chat API를 사용자 OAuth로 호출하는 bun 런타임. 외부 의존성 없이 `bun:sqlite`와 node 표준 모듈을 사용한다. 배포본은 `cli.ts`를 `bun build --compile`한 단일 실행 파일이다. 설치는 [루트 가이드](../../INSTALL.md)를 참고한다.
 
@@ -8,11 +8,12 @@ Google Chat API를 사용자 OAuth로 호출하는 bun 런타임. 외부 의존�
 
 ```bash
 mailman auth [--client <client_secret.json>]
-mailman spaces [검색어] [--refresh]
-mailman collect [대상] [--dm <사람>] [--save <별칭>] [--deep]
-mailman fetch [대상] [--dm <사람>] [--save <별칭>] [--since <기간|날짜>] [--only bot|human] [--no-collect] [--deep] [--with-attachments]
-printf '%s\n' '본문' | mailman send [대상] [--dm <사람>] [--save <별칭>] [--attach <파일> ...] [--thread spaces/.../threads/...] [--agent claude|codex] [--no-tag] [--dry-run | --wait]
-mailman wait [대상] [--dm <사람>] [--save <별칭>] [--thread spaces/.../threads/...] [--from <사람>] [--quiet 60s] [--timeout 30m] [--interval 15s]
+mailman doctor
+mailman spaces [검색어] [--refresh] [--save <별칭>] [--default]
+mailman collect [대상] [--dm <사람>] [--save <별칭>] [--default] [--deep]
+mailman fetch [대상] [--dm <사람>] [--save <별칭>] [--default] [--since <기간|날짜>] [--only bot|human] [--no-collect] [--deep] [--with-attachments]
+printf '%s\n' '본문' | mailman send [대상] [--dm <사람>] [--save <별칭>] [--default] [--attach <파일> ...] [--thread spaces/.../threads/...] [--agent claude|codex] [--no-tag] [--dry-run | --wait]
+mailman wait [대상] [--dm <사람>] [--save <별칭>] [--default] [--thread spaces/.../threads/...] [--from <사람>] [--quiet 60s] [--timeout 30m] [--interval 15s]
 mailman download <메시지 name> [--out <디렉터리>] [--print]
 mailman react <메시지 name> <👀|✅>
 mailman --help
@@ -26,7 +27,7 @@ MAILMAN_BACKFILL_DAYS=60 mailman collect team --deep
 
 ## 대상 해석
 
-`resolve.ts`를 collect/fetch/send/wait가 공유한다. config 별칭, 리터럴 `spaces/ID`, `--dm <사람>`, 스페이스 표시 이름 순서다. 위치 인자와 `--dm`은 배타적이다. 이름은 NFKC·소문자·공백 제거 후 정확 일치 우선, 없으면 부분 일치하며 유일해야 한다. 다중 후보는 이름·종류·ID를 안내하고 exit 1이다. 0개면 캐시를 한 번 새로 고치고 재시도하며, 그래도 없으면 `mailman spaces`를 안내한다. 빈 캐시도 가져온 상태를 기록해 매번 다시 요청하지 않는다.
+`resolve.ts`를 collect/fetch/send/wait와 `spaces --save`가 공유한다. config 별칭, 리터럴 `spaces/ID`, `--dm <사람>`, 스페이스 표시 이름 순서다(`spaces`에는 `--dm` 없음). 위치 인자와 `--dm`은 배타적이다. 이름은 NFKC·소문자·공백 제거 후 정확 일치 우선, 없으면 부분 일치하며 유일해야 한다. 다중 후보는 이름·종류·ID를 안내하고 exit 1이다. 0개면 캐시를 한 번 새로 고치고 재시도하며, 그래도 없으면 `mailman spaces`를 안내한다. 빈 캐시도 가져온 상태를 기록해 매번 다시 요청하지 않는다.
 
 `spaces`는 설정 파일 없이 동작한다. `spaces.list`를 100개씩 최대 1,000페이지 받아 완전히 성공한 뒤 목록 캐시를 원자 교체한다. 검색은 표시 이름 부분 일치다. `--refresh` 또는 캐시가 없을 때만 API를 호출한다. `--dm`은 `users/ID`·이메일(`users/<이메일>`)을 그대로 쓰고, 사람 이름은 DB 발신자의 표시 이름을 정규화 정확 일치해 유일한 `sender_name`을 찾는다. 동명이인은 후보를 보여 주고 이메일을 요청한다. `spaces:findDirectMessage`의 404는 아직 DM이 없다는 안내이며 생성하지 않는다.
 
@@ -34,23 +35,31 @@ MAILMAN_BACKFILL_DAYS=60 mailman collect team --deep
 
 미등록 방도 이번 호출에서만 수집·조회·전송한다. `--save`만 최신 config에 새 별칭을 추가한다. 기존 별칭 충돌은 거절하고 모든 다른 필드를 보존해 0600 임시 파일에서 원자 교체한다. 출력·전송 미리보기 첫 줄은 `[대상] 이름 (종류, spaces/...)`다. 기존 별칭·리터럴의 메타데이터가 캐시에 없을 때는 입력 이름과 `SPACE_TYPE_UNSPECIFIED`를 표시해 오프라인 조회를 유지한다. `spaces --refresh`로 보완할 수 있다. `send --dry-run`은 대상과 태그 적용 본문을 출력하고 전송하지 않는다.
 
+설치기는 설정 파일을 만들지 않는다. 설정 파일이 없으면 대상을 명시한 첫 `--save`가 그 별칭을 기본 방으로 지정해 0600 설정 파일을 만든다. **처음 저장한 별칭이 기본 방이며 바꾸려면 `--save <별칭> --default`**를 쓴다. 기존 별칭은 해석된 대상과 같은 방일 때만 기본 지정만 바꾸며 별칭의 값·추가 필드는 보존한다. `spaces --save <기존 별칭> --default`처럼 대상을 생략하면 그 별칭을 선택한다. `--default` 단독은 인자 오류다. 기존 파일이 잘못된 경우에는 덮어쓰지 않고 오류로 끝낸다. `send --dry-run --save`는 별칭·기본 방·파일 권한을 변경하거나 파일을 만들지 않는다.
+
 DM 대상은 수집된 sender 표시명을 알면 `DM: 이름 → users/ID`, 모르면 `DM: users/ID`로 표시한다. 대기 중 받은 sender 표시명도 마지막 출력에 반영한다. 출력 머리의 방 라벨은 `DM: 이름 또는 users/ID`, 일반 스페이스는 표시 이름(없으면 별칭/ID)이다. `--dry-run --save`는 별칭 충돌을 검사하고 저장할 예정만 표시하며 config 내용·권한을 바꾸지 않는다.
 
 - `auth --client <파일>`: Google 데스크톱 앱(`installed`) 형식과 인증 주소를 검증한 뒤 클라이언트 파일 경로로 0600 원자 복사하고 로그인한다. 같은 경로면 권한만 맞춘다. 검증 실패 시 복사·로그인하지 않는다(exit 1).
 - `auth`: 기존 클라이언트 파일로 로그인한다. 파일이 없으면 설정 가이드 URL을 안내하고 exit 2.
 
+## 설정 점검
+
+`doctor.ts`는 경로·0600 권한, 설정 JSON과 defaultSpace, 데스크톱 클라이언트, 토큰·필수/리액션 스코프, OAuth 갱신, `GET /v1/spaces?pageSize=1`을 순서대로 점검한다. 파일·DB·권한·캐시·로그를 변경하지 않고 브라우저를 열지 않는다. 기본 방 메시지 조회는 하지 않는다. 파일 검증과 OAuth 갱신은 `auth.ts`, API 호출은 `chat.ts`를 공유하며 실제 네트워크 없이 fetch를 주입해 검증한다.
+
+실패가 있으면 exit 1, 경고만 있으면 0이다. 설정 파일·DB 없음과 예시 자리표시 기본 방·0600이 아닌 권한·리액션 스코프 없음은 경고다. 클라이언트 없음은 받은 JSON의 8단계 등록 또는 처음 만드는 6단계, web 유형은 6단계를 안내한다. 갱신의 invalid_client/deleted_client/unauthorized_client는 새 JSON을 받거나 만들어 auth --client로 등록하도록 6단계를 안내한다. invalid_grant는 기존 5단계 게시·재인증 안내를 유지한다. 설정 오류가 있어도 독립적인 인증 점검은 계속하고, 클라이언트·토큰 실패 뒤에는 갱신/API를 건너뛴다. 응답 원문을 출력하지 않고 원인과 [설정 가이드](https://thewronghand-bigs.github.io/mailman/setup)의 단계 링크만 표시한다. 게시 상태·브라우저 계정·관리자 콘솔은 조회하지 않는다.
+
 ## 빌드
 
 ```bash
 bash ../build.sh                         # 버전은 package.json
-MAILMAN_VERSION=2.2.0 bash ../build.sh   # 버전 덮어쓰기
+MAILMAN_VERSION=2.3.0 bash ../build.sh   # 버전 덮어쓰기
 ```
 
 `--target=bun-darwin-arm64`/`bun-darwin-x64`로 `dist/mailman-darwin-arm64`, `dist/mailman-darwin-x64`를 만들고 `--define MAILMAN_BUILD_VERSION`으로 버전을 주입한 뒤 ad-hoc 서명한다. 현재 아키텍처 바이너리로 최소 환경(`env -i`)에서 `--version`·`--help`를 스모크한다. `dist/`는 gitignore 대상이다. 컴파일된 실행 파일은 스크립트 위치(`import.meta.url`)에 의존하지 않는다.
 
 ## 설정과 경로
 
-설정 예시는 `config.example.json`이다. `defaultSpace`와 `spaces.<별칭>.space`를 작성한다. 선택적인 `webhookUrl`은 카드 전송용이며 v2 텍스트 전송에서는 사용하지 않는다. 최상위 `sendTag`(선택, 기본 `true`)를 `false`로 두면 전송 태그를 붙이지 않는다. 불리언이 아니면 설정 오류(exit 1)다. 이전 설정/DB와 호환하지 않는다.
+`config.example.json`은 문서 참고용이며 설치기가 복사하지 않는다. `defaultSpace`와 `spaces.<별칭>.space`는 `--save`·`--default`로 저장한다. 선택적인 `webhookUrl`은 카드 전송용이며 v2 텍스트 전송에서는 사용하지 않는다. 최상위 `sendTag`(선택, 기본 `true`)를 `false`로 두면 전송 태그를 붙이지 않는다. 불리언이 아니면 설정 오류(exit 1)다. 이전 설정/DB와 호환하지 않는다.
 
 | 변수 | 기본값/용도 |
 |------|-------------|
@@ -173,8 +182,8 @@ stdout 쓰기가 완료된 뒤 실제 표시한 새 메시지의 최대 생성 �
 
 | 코드 | 의미 |
 |------|------|
-| 0 | 성공/help/버전; `mailman fetch`는 수집 실패 후 기존 DB 출력도 성공으로 처리 |
-| 1 | 인자·설정·파일 권한/첨부 검증 오류, 잘못된 `--client` 파일, 본문·첨부 모두 없음 |
+| 0 | 성공/help/버전, doctor 경고만 있음; `mailman fetch`는 수집 실패 후 기존 DB 출력도 성공으로 처리 |
+| 1 | 인자·설정·파일 권한/첨부 검증 오류, 잘못된 `--client` 파일, 본문·첨부 모두 없음, doctor 실패 항목 있음 |
 | 2 | 토큰 파일 또는 OAuth 클라이언트 파일 없음, react의 선택 스코프 없음 (`mailman auth` 필요) |
 | 3 | 재인증 필요, OAuth/HTTP/네트워크/페이지 수집 실패 |
 | 4 | wait 또는 send --wait에서 timeout까지 답장 없음 (과거 안 읽은 메시지는 표시할 수 있음). send --wait는 이미 전송 완료됨, 재전송 금지 |

@@ -45,7 +45,7 @@ mailman(이하 "앱")은 사용자의 Mac에서만 실행되는 오픈소스 명
 
 **`~/.claude/secrets/` — 인증 정보(파일 권한 0600)**
 
-- OAuth 클라이언트 파일: 사용자가 자기 Google Cloud 프로젝트에서 받아 `mailman auth --client`로 등록한 데스크톱 앱 클라이언트 JSON(client id/secret)
+- OAuth 클라이언트 파일: 본인 프로젝트에서 만들거나 설정을 마친 동료의 프로젝트에서 사람별로 발급받아 `mailman auth --client`로 등록한 데스크톱 앱 클라이언트 JSON(client id/secret)
 - 토큰 파일: refresh token, 로그인한 계정의 이메일 주소, 허용된 스코프 목록, Google 계정 ID(`user_name: users/<sub>`). 계정 ID는 대기 중 내 메시지를 제외하는 데 사용합니다.
 
 access token은 저장하지 않고 실행할 때마다 새로 받아 메모리에서만 사용합니다. auth에서 받은 id_token의 계정 ID(sub)만 저장하고 id_token 원문은 저장하지 않습니다. 이전 토큰 파일에 계정 ID가 없으면 첫 대기 때 Google userinfo로 한 번 조회해 보완합니다.
@@ -72,7 +72,7 @@ access token은 저장하지 않고 실행할 때마다 새로 받아 메모리�
 - `messages.get`(`GET /v1/{message name}`)은 첨부 대상 메시지가 DB에 없을 때 사용하며 이 단건 조회 결과는 DB에 저장하지 않습니다. 업로드 파일은 `media.download`(`GET /v1/media/{resourceName}?alt=media`)로 받아 로컬에 저장합니다. 다운로드 리다이렉트는 HTTPS의 `*.googleapis.com`·`*.googleusercontent.com`·`*.google.com`만 최대 5회 따릅니다. 호스트가 바뀌면 Authorization 헤더를 제거하고 허용 범위 밖에는 요청하지 않습니다. `reactions.create`(`POST /v1/{message name}/reactions`)에는 지정한 👀 또는 ✅를 보내 로그인한 사용자 명의로 추가합니다. 이미 같은 리액션이 있으면 성공으로 처리합니다. Drive API와 외부 downloadUri에는 요청하지 않습니다.
 - `send --attach <파일>`은 사용자가 지정한 로컬 일반 파일을 Google Chat에 업로드합니다. 심볼릭 링크 파일은 거절하며 미리보기·성공 출력의 경로는 실제 경로(realpath)입니다. 최대 10개·각 200MB를 모두 검증하고 `media.upload`(`POST /upload/v1/{space}/attachments:upload?uploadType=multipart`)에 basename 메타데이터(`filename`)와 원본 바이트를 multipart로 보냅니다. 로컬 전체 경로는 업로드 메타데이터로 보내지 않습니다. 기존 chat.messages.create 권한만 사용하며, 받은 attachmentDataRef를 messages.create의 attachment[]에 넣습니다. 전부 업로드해야 메시지를 생성하고 실패 시 메시지는 보내지 않습니다. 이미 성공한 업로드를 삭제하는 API는 호출하지 않습니다. CLI는 전송 파일을 추가로 로컬 복사하지 않습니다. --dry-run은 업로드 없이 경로·이름·크기를 출력하며 성공 출력은 파일 이름과 실제 경로를 표시합니다.
 - Claude/Codex 커맨드·스킬은 지정 파일의 경로·이름·크기를 미리보기에 포함해 전송 승인받습니다. 사용자가 지정하지 않은 파일과 .env·키·토큰·자격증명 파일은 첨부하지 않습니다. 핸드오버 md 작성·전송 요청은 먼저 파일로 쓴 뒤 그 경로를 미리보기에서 승인받아 첨부합니다. local.md로 이 파일 제한과 승인을 완화할 수 없습니다.
-- 각 사용자는 **자기 Google Cloud 프로젝트의 OAuth 클라이언트**를 사용합니다. 따라서 개발자는 사용자의 토큰이나 데이터에 접근할 수 없습니다.
+- 각 사용자는 **본인용으로 발급된 OAuth 클라이언트**와 본인 Google 계정으로 로그인합니다. 프로젝트는 본인이 만들거나 동료의 프로젝트를 사용할 수 있습니다. 로그인 토큰은 사용자 기기에 저장되며, 클라이언트를 발급한 동료나 개발자에게 전달되지 않습니다.
 - 사용자가 Claude Code·Codex 같은 AI 도구에서 `/mailman` 슬래시 커맨드나 `$mailman` 스킬로 조회 결과를 열면, 그 출력은 사용자가 실행 중인 해당 도구의 세션에 입력됩니다. 이 처리는 사용자와 해당 도구 제공자 사이의 약관을 따르며, 앱 개발자는 관여하지 않습니다.
 - 앱의 Google API 사용자 데이터 사용은 [Google API 서비스 사용자 데이터 정책](https://developers.google.com/terms/api-services-user-data-policy)(제한적 사용 요건 포함)을 따릅니다.
 
