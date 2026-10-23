@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { isSendAgent, NEUTRAL_SEND_LABEL, SEND_AGENT_LABELS, sendPrefix, type SendAgent } from "./content";
 import { isRecord, MailmanError, registerSecret } from "./errors";
 
 export type MailmanSpace = { space: string; webhookUrl?: string };
-export type MailmanConfig = { defaultSpace: string; spaces: Record<string, MailmanSpace> };
+// sendTag: false면 mailman send가 전송 태그를 붙이지 않는다. 생략 시 true.
+export type MailmanConfig = { defaultSpace: string; spaces: Record<string, MailmanSpace>; sendTag: boolean };
 export type Environment = Record<string, string | undefined>;
 export type RuntimePaths = ReturnType<typeof getRuntimePaths>;
 
@@ -66,7 +68,9 @@ export function loadConfig(configFile: string): MailmanConfig {
   if (!Object.hasOwn(spaces, parsed.defaultSpace)) {
     throw new MailmanError("defaultSpace가 spaces에 등록된 별칭과 일치하지 않습니다.");
   }
-  return { defaultSpace: parsed.defaultSpace, spaces };
+  const sendTag: unknown = parsed.sendTag === undefined ? true : parsed.sendTag;
+  if (typeof sendTag !== "boolean") throw new MailmanError("설정 파일의 sendTag는 true 또는 false여야 합니다.");
+  return { defaultSpace: parsed.defaultSpace, spaces, sendTag };
 }
 
 export function resolveSpace(config: MailmanConfig, requestedKey?: string) {
@@ -86,4 +90,25 @@ export function collectionOptions(env: Environment = process.env, deepFlag = fal
     throw new MailmanError("MAILMAN_BACKFILL_DAYS는 1~36500 사이의 정수여야 합니다.");
   }
   return { deep, backfillDays };
+}
+
+export const SEND_AGENT_HINT = "claude 또는 codex";
+
+// --agent와 MAILMAN_AGENT가 함께 쓰는 값 검증. 대소문자는 무시한다.
+export function parseAgent(value: string, source: string): SendAgent {
+  const lower = value.toLowerCase();
+  if (isSendAgent(lower)) return lower;
+  throw new MailmanError(`${source}는 ${SEND_AGENT_HINT}여야 합니다.`);
+}
+
+export type SendPrefix = { prefix: string; untaggedReason?: string };
+
+// 태그 결정 순서: --no-tag > 설정 sendTag: false > 라벨(--agent > MAILMAN_AGENT > 중립 AI).
+// MAILMAN_AGENT는 태그를 붙이고 --agent가 없을 때만 읽는다. 빈 문자열은 미지정으로 본다.
+export function resolveSendPrefix(options: { agent?: SendAgent; tag: boolean }, config: Pick<MailmanConfig, "sendTag">,
+  env: Environment = process.env): SendPrefix {
+  if (!options.tag) return { prefix: "", untaggedReason: "--no-tag" };
+  if (!config.sendTag) return { prefix: "", untaggedReason: "설정 sendTag: false" };
+  const agent = options.agent ?? (env.MAILMAN_AGENT ? parseAgent(env.MAILMAN_AGENT, "MAILMAN_AGENT") : undefined);
+  return { prefix: sendPrefix(agent ? SEND_AGENT_LABELS[agent] : NEUTRAL_SEND_LABEL) };
 }

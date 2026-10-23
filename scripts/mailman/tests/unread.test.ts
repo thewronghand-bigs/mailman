@@ -2,11 +2,13 @@ import { describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import type { ChatMessage } from "../chat";
 import { collectMessages } from "../collector";
-import { SEND_PREFIX } from "../content";
+import { sendPrefix } from "../content";
 import { printInbox, queryInbox, renderInbox } from "../fetch";
 import { getMeta, openDatabase, setMeta, toRow, upsertRows } from "../store";
 import { normalizeTime, parseSince } from "../time";
 import { message, SPACE, THREAD } from "./helpers";
+
+const SEND_PREFIX = sendPrefix("Claude");
 
 const NOW = new Date("2026-10-22T12:00:00Z");
 const OPTIONS = { spaceKey: "tn", space: SPACE, now: NOW };

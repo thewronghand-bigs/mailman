@@ -7,7 +7,9 @@ import { errorMessage, MailmanError } from "./errors";
 import { printInbox, type SenderType } from "./fetch";
 import type { Fetch } from "./http";
 import packageJson from "./package.json" with { type: "json" };
-import { collectionOptions, getRuntimePaths, loadConfig, resolveSpace, SETUP_GUIDE_URL, validateThread, type RuntimePaths } from "./runtime";
+import type { SendAgent } from "./content";
+import { collectionOptions, getRuntimePaths, loadConfig, parseAgent, resolveSendPrefix, resolveSpace, SEND_AGENT_HINT, SETUP_GUIDE_URL, validateThread,
+  type Environment, type RuntimePaths } from "./runtime";
 import { buildMessageBody, sendMessage } from "./send";
 import { openDatabase } from "./store";
 import { parseSince } from "./time";
@@ -24,8 +26,10 @@ export type Arguments = {
   thread?: string;
   only?: SenderType;
   client?: string;
+  agent?: SendAgent;
   deep: boolean;
   collect: boolean;
+  tag: boolean;
 };
 
 const COMMANDS: readonly Command[] = ["auth", "collect", "fetch", "send"];
@@ -38,7 +42,7 @@ export const USAGE = `mailman — Google Chat 스페이스 메시지를 로컬�
   auth [--client <client_secret.json>]    Google 로그인. --client로 OAuth 클라이언트 JSON을 등록
   collect [스페이스] [--deep]              Chat API 증분 수집 (--deep: 최근 30일 백필)
   fetch [스페이스] [옵션]                  수집 후 새 메시지 조회
-  send [스페이스] [--thread <스레드>]      stdin 본문을 사용자 명의로 전송
+  send [스페이스] [옵션]                   stdin 본문을 사용자 명의로 태그를 붙여 전송
 
 mailman <명령> --help    명령별 도움말
 mailman --version        버전
@@ -58,8 +62,11 @@ Google Chat API 증분 수집. --deep(또는 MAILMAN_DEEP=1)이면 수집 커서
 --since 24h / 3d / 2026-10-01: 지정 시점 이후 조회, seen 커서 유지.
 --only bot|human: 해당 발신자 유형의 새 메시지만 조회, seen 커서 유지.
 --no-collect: 수집 없이 DB만 조회. --deep: 조회 전 최근 30일 백필 수집.`,
-  send: `사용: mailman send [스페이스] [--thread spaces/.../threads/...] < 본문.txt
-사용자 명의로 [🤖 Claude] 태그를 붙여 텍스트 전송. 실패 시 재시도하지 않음.`,
+  send: `사용: mailman send [스페이스] [--thread spaces/.../threads/...] [--agent claude|codex] [--no-tag] < 본문.txt
+사용자 명의로 본문 앞에 [🤖 <라벨>] 태그를 붙여 텍스트 전송. 실패 시 재시도하지 않음.
+--agent claude|codex: 라벨을 Claude/Codex로 표시 (대소문자 무시). 없으면 환경변수 MAILMAN_AGENT, 둘 다 없으면 [🤖 AI].
+--no-tag: 이번 전송만 태그 없이 보냄. --agent와 함께 쓸 수 없음.
+설정 파일 최상위 "sendTag": false면 항상 태그 없이 보냄 (기본 true).`,
 };
 
 function isCommand(value: string | undefined): value is Command {
@@ -73,7 +80,7 @@ function parseOnly(value: string): SenderType {
 }
 
 export function parseArguments(command: Command, args: string[], now = new Date()): Arguments {
-  const result: Arguments = { help: false, deep: false, collect: true };
+  const result: Arguments = { help: false, deep: false, collect: true, tag: true };
   if (args.includes("--help") || args.includes("-h")) return { ...result, help: true };
   const value = (index: number, message: string): string => {
     const next = args[index];
@@ -93,6 +100,10 @@ export function parseArguments(command: Command, args: string[], now = new Date(
       result.deep = true;
     } else if (arg === "--thread" && command === "send" && result.thread === undefined) {
       result.thread = value(++index, "--thread 뒤에 spaces/.../threads/... 이름을 지정하세요.");
+    } else if (arg === "--agent" && command === "send" && result.agent === undefined) {
+      result.agent = parseAgent(value(++index, `--agent 뒤에 ${SEND_AGENT_HINT}를 지정하세요.`), "--agent");
+    } else if (arg === "--no-tag" && command === "send" && result.tag) {
+      result.tag = false;
     } else if (arg === "--client" && command === "auth" && result.client === undefined) {
       result.client = value(++index, "--client 뒤에 Google에서 받은 client_secret JSON 경로를 지정하세요.");
     } else if (arg.startsWith("-")) throw new MailmanError(HELP[command]);
@@ -100,6 +111,8 @@ export function parseArguments(command: Command, args: string[], now = new Date(
   }
   if (positional.length > (command === "auth" ? 0 : 1)) throw new MailmanError(HELP[command]);
   if (result.deep && !result.collect) throw new MailmanError("--deep과 --no-collect는 함께 쓸 수 없습니다.");
+  // 태그를 끄면서 라벨을 지정하는 것은 의도가 충돌하므로 한쪽을 무시하지 않고 거절한다.
+  if (result.agent !== undefined && !result.tag) throw new MailmanError("--agent와 --no-tag는 함께 쓸 수 없습니다.");
   result.spaceKey = positional[0];
   return result;
 }
@@ -110,6 +123,7 @@ type Dependencies = {
   stdout?: (text: string) => unknown;
   stderr?: (text: string) => void;
   stdin?: () => string;
+  env?: Environment;
   now?: Date;
   // 테스트에서 브라우저·Google 호출 없이 auth 흐름을 확인하기 위해 주입한다.
   authenticate?: (paths: RuntimePaths) => Promise<{ email: string; scopes: string[] }>;
@@ -135,7 +149,8 @@ export async function main(args: string[], dependencies: Dependencies = {}): Pro
     const now = dependencies.now ?? new Date();
     const options = parseArguments(command, args.slice(1), now);
     if (options.help) { await out(HELP[command]); return 0; }
-    const paths = dependencies.paths ?? getRuntimePaths();
+    const env = dependencies.env ?? process.env;
+    const paths = dependencies.paths ?? getRuntimePaths(env);
     const fetcher = dependencies.fetcher ?? fetch;
     if (command === "auth") {
       if (options.client !== undefined) {
@@ -151,20 +166,23 @@ export async function main(args: string[], dependencies: Dependencies = {}): Pro
       await out(`✅ 인증 완료\n이메일: ${token.email}\n허용 스코프:\n${token.scopes.map(scope => `- ${scope}`).join("\n")}`);
       return 0;
     }
-    const { spaceKey, space } = resolveSpace(loadConfig(paths.configFile), options.spaceKey);
+    const config = loadConfig(paths.configFile);
+    const { spaceKey, space } = resolveSpace(config, options.spaceKey);
     if (command === "send") {
       if (options.thread) validateThread(space.space, options.thread);
       if (!dependencies.stdin && process.stdin.isTTY) throw new MailmanError("본문은 stdin으로 전달하세요. mailman send --help를 확인하세요.");
       const text = dependencies.stdin ? dependencies.stdin() : readFileSync(0, "utf8");
-      buildMessageBody(text, options.thread);
+      const { prefix, untaggedReason } = resolveSendPrefix(options, config, env);
+      buildMessageBody(text, prefix, options.thread);
       const client = new ChatClient(await getAccessToken(paths, fetcher), fetcher);
-      const created = await sendMessage(client, space.space, text, options.thread);
-      await out(`✅ 전송 완료\nmessage name: ${created.name}\nthread name: ${created.thread.name}`);
+      const created = await sendMessage(client, space.space, text, prefix, options.thread);
+      const untagged = untaggedReason ? `\n태그 없이 전송했습니다 (${untaggedReason}).` : "";
+      await out(`✅ 전송 완료${untagged}\nmessage name: ${created.name}\nthread name: ${created.thread.name}`);
       return 0;
     }
     const collect = async () => {
       try {
-        const settings = collectionOptions(process.env, options.deep);
+        const settings = collectionOptions(env, options.deep);
         const client = new ChatClient(await getAccessToken(paths, fetcher), fetcher);
         const db = openDatabase(paths.dbPath);
         try {

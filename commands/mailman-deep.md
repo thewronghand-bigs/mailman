@@ -35,12 +35,12 @@ allowed-tools: Bash(~/.claude/bin/mailman:*)
 
 이 세션의 스펙으로 구현/수정을 완료했을 때만 작업 완료 알림 초안을 작성한다. 도메인, 핵심 변경, 변경 파일, 남은 이슈/질문을 5~10줄 이내로 적는다. 질문은 사용자가 명시적으로 보내 달라고 요청한 경우에만 대상 API와 질문을 짧게 작성한다.
 
-1. **초안 미리보기**: 전송 대상 스페이스와 답글 대상 `thread_name`을 밝힌다. 사용자 명의 + `[🤖 Claude] ` 태그로 전송된다는 점을 보여준다.
+1. **초안 미리보기**: 전송 대상 스페이스와 답글 대상 `thread_name`을 밝힌다. 사용자 명의로 전송된다는 점을 보여준다. 본문 앞에 `[🤖 Claude] `(Codex는 `[🤖 Codex] `) 태그가 붙는다. 사용자가 설정에서 끈 경우(`sendTag: false`) 태그 없이 나간다.
 2. **사용자 승인**: 초안을 보여주고 "이 내용으로 Google Chat에 전송할까요?"라고 묻는다. 승인 전에는 전송하지 않는다. 수정하면 다시 승인받는다.
 3. **승인 후 전송**:
 
    ```bash
-   cat <<'MAILMAN_EOF' | ~/.claude/bin/mailman send [스페이스별칭] --thread spaces/SPACE_ID/threads/THREAD_ID
+   cat <<'MAILMAN_EOF' | ~/.claude/bin/mailman send [스페이스별칭] --agent claude --thread spaces/SPACE_ID/threads/THREAD_ID
    [승인된 본문]
    MAILMAN_EOF
    ```

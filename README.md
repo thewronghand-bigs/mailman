@@ -37,6 +37,8 @@ mailman fetch team --only bot                               # 봇 메시지만 (
 mailman fetch team --no-collect                             # 수집 없이 DB만 조회
 printf '%s\n' '확인했습니다.' | mailman send team
 printf '%s\n' '명세 반영 완료했습니다.' | mailman send team --thread spaces/SPACE_ID/threads/THREAD_ID
+printf '%s\n' '확인했습니다.' | mailman send team --agent codex   # [🤖 Codex] 태그
+printf '%s\n' '확인했습니다.' | mailman send team --no-tag        # 이번만 태그 없이
 mailman --help
 mailman --version
 ```
@@ -59,6 +61,7 @@ curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/inst
 ```json
 {
   "defaultSpace": "team",
+  "sendTag": true,
   "spaces": {
     "team": {
       "space": "spaces/SPACE_ID",
@@ -68,7 +71,7 @@ curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/inst
 }
 ```
 
-`space`는 Chat API의 리소스 이름(`spaces/` + Chat 웹 URL 끝의 ID)입니다. 별칭을 추가하면 여러 스페이스를 사용할 수 있습니다. `webhookUrl`은 선택 사항이며 카드 전송에만 씁니다. 자세한 내용은 [INSTALL.md](INSTALL.md)를 참고하세요.
+`space`는 Chat API의 리소스 이름(`spaces/` + Chat 웹 URL 끝의 ID)입니다. 별칭을 추가하면 여러 스페이스를 사용할 수 있습니다. `webhookUrl`은 선택 사항이며 카드 전송에만 씁니다. `sendTag`도 선택 사항이며(기본 `true`) `false`로 두면 `mailman send`가 전송 태그를 붙이지 않습니다([인증과 전송](#인증과-전송) 참고). 자세한 내용은 [INSTALL.md](INSTALL.md)를 참고하세요.
 
 ### 개인 컨벤션 (`local.md`)
 
@@ -139,7 +142,11 @@ network_access = true
 - `https://www.googleapis.com/auth/chat.messages.readonly`
 - `https://www.googleapis.com/auth/chat.messages.create`
 
-`mailman send`는 **로그인한 사용자 명의**로 본문 앞에 `[🤖 Claude] `를 붙입니다. `--thread`를 주면 원 스레드에 답글을 보내며, API가 답글을 만들 수 없으면 새 스레드로 전환합니다. 실패 시 자동 재시도하지 않습니다. 슬래시 커맨드에서는 초안을 보여주고 **사용자 승인 후** 전송합니다.
+`mailman send`는 **로그인한 사용자 명의**로 본문 앞에 `[🤖 <라벨>] ` 태그를 붙입니다. 라벨은 `--agent claude|codex`(대소문자 무시)로 `Claude`/`Codex`를 지정하고, 없으면 환경변수 `MAILMAN_AGENT`(같은 값)를, 둘 다 없으면 중립 라벨 `AI`(`[🤖 AI] `)를 씁니다. 그 밖의 값은 오류입니다. `/mailman` 커맨드는 `--agent claude`, Codex `$mailman` 스킬은 `--agent codex`로 보냅니다.
+
+태그를 빼려면 설정 파일 최상위에 `"sendTag": false`를 두거나(항상), 호출할 때 `--no-tag`를 줍니다(이번 전송만, 설정보다 우선). `--no-tag`와 `--agent`를 함께 주면 의도가 충돌하므로 오류로 거절합니다. 태그 없이 보내면 성공 출력에 `태그 없이 전송했습니다`가 한 줄 붙습니다.
+
+`--thread`를 주면 원 스레드에 답글을 보내며, API가 답글을 만들 수 없으면 새 스레드로 전환합니다. 실패 시 자동 재시도하지 않습니다. 슬래시 커맨드에서는 초안을 보여주고 **사용자 승인 후** 전송합니다.
 
 사용자 인증 전송은 텍스트 전용입니다. `cardsV2`는 [commands/mailman.md](commands/mailman.md)의 기존 웹훅 curl 절차를 계속 사용합니다. [Chat API 전송 규격](https://developers.google.com/workspace/chat/api/reference/rest/v1/spaces.messages/create)을 참고하세요.
 
@@ -158,6 +165,7 @@ network_access = true
 | `MAILMAN_CLIENT_FILE` | `~/.claude/secrets/mailman-oauth.json` |
 | `MAILMAN_TOKEN_FILE` | `~/.claude/secrets/mailman-token.json` |
 | `MAILMAN_DEEP=1` | `--deep`과 같음, 최근 30일 백필 재수집 |
+| `MAILMAN_AGENT` | `claude` 또는 `codex`, `--agent`가 없을 때 전송 태그 라벨 |
 | `MAILMAN_BACKFILL_DAYS` | 최초/백필 창 일수, 기본 7/30, 1~36500 |
 
 인증정보 경로는 `MAILMAN_HOME`과 독립적입니다. 다른 위치를 쓰려면 `MAILMAN_CLIENT_FILE`과 `MAILMAN_TOKEN_FILE`을 각각 지정하세요.
