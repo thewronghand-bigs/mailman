@@ -1,35 +1,48 @@
 # mailman v2 런타임
 
-Google Chat API를 사용자 OAuth로 호출하는 bun 전용 런타임. 외부 의존성 없이 `bun:sqlite`와 node 표준 모듈을 사용한다. 설치는 [루트 가이드](../../INSTALL.md)를 참고한다.
+Google Chat API를 사용자 OAuth로 호출하는 bun 런타임. 외부 의존성 없이 `bun:sqlite`와 node 표준 모듈을 사용한다. 배포본은 `cli.ts`를 `bun build --compile`한 단일 실행 파일이다. 설치는 [루트 가이드](../../INSTALL.md)를 참고한다.
 
 ## 명령
 
+예시는 `~/.claude/bin`이 PATH에 있다고 가정한다. 아니면 `~/.claude/bin/mailman` 전체 경로로 실행한다.
+
 ```bash
-bash run.sh auth
-bash run.sh [스페이스별칭]
-bash fetch.sh [스페이스별칭] [--since <기간|날짜>]
-printf '%s\n' '본문' | bash send.sh [스페이스별칭] [--thread spaces/.../threads/...]
-bash fetch.sh tn --since 7d
-bash fetch.sh tn --since 2026-10-01
-MAILMAN_DEEP=1 bash fetch.sh tn
-MAILMAN_DEEP=1 MAILMAN_BACKFILL_DAYS=60 bash run.sh tn
-bun test
+mailman auth [--client <client_secret.json>]
+mailman collect [스페이스별칭] [--deep]
+mailman fetch [스페이스별칭] [--since <기간|날짜>] [--only bot|human] [--no-collect] [--deep]
+printf '%s\n' '본문' | mailman send [스페이스별칭] [--thread spaces/.../threads/...]
+mailman --help
+mailman --version
+MAILMAN_BACKFILL_DAYS=60 mailman collect team --deep
 ```
 
-각 래퍼는 `--help`를 지원한다. help와 인자 오류에서는 인증·수집을 시도하지 않는다. 스페이스 생략 시 `config.json`의 `defaultSpace`를 쓰고, 알 수 없는 별칭은 에러로 처리한다. 조회는 한 번에 새 메시지 최대 200건이다.
+개발 중에는 레포에서 `./mailman-dev <명령>`(또는 `bun cli.ts <명령>`)로 같은 CLI를 실행한다. `mailman-dev`는 `~/.bun/bin`, `NVM_BIN`, `~/.nvm/versions/node/*/bin`(버전 내림차순), `/opt/homebrew/bin`, `/usr/local/bin`, 기존 PATH 순서로 bun을 찾고 심볼릭 링크로 실행돼도 레포 위치를 찾는다. source하면 bun 탐색 함수 `mailman_setup_path`만 정의한다(`scripts/build.sh`에서 사용).
 
-`lib.sh`에서 공통으로 bun PATH를 구성한다. `~/.bun/bin`, `NVM_BIN`, `~/.nvm/versions/node/*/bin`(버전 내림차순), `/opt/homebrew/bin`, `/usr/local/bin`, 기존 PATH 순서로 찾는다.
+각 명령은 `--help`를 지원한다. help·버전·인자 오류에서는 설정을 읽거나 인증·수집을 시도하지 않는다. 스페이스 생략 시 설정의 `defaultSpace`를 쓰고, 알 수 없는 별칭은 에러로 처리한다. 조회는 한 번에 새 메시지 최대 200건이다. `fetch`는 조회 전에 수집을 시도하며 `--no-collect`로 생략한다. `--deep`과 `--no-collect`는 함께 쓸 수 없다.
+
+- `auth --client <파일>`: Google 데스크톱 앱(`installed`) 형식과 인증 주소를 검증한 뒤 클라이언트 파일 경로로 0600 원자 복사하고 로그인한다. 같은 경로면 권한만 맞춘다. 검증 실패 시 복사·로그인하지 않는다(exit 1).
+- `auth`: 기존 클라이언트 파일로 로그인한다. 파일이 없으면 설정 가이드 URL을 안내하고 exit 2.
+
+## 빌드
+
+```bash
+bash ../build.sh                         # 버전은 package.json
+MAILMAN_VERSION=2.1.0 bash ../build.sh   # 버전 덮어쓰기
+```
+
+`--target=bun-darwin-arm64`/`bun-darwin-x64`로 `dist/mailman-darwin-arm64`, `dist/mailman-darwin-x64`를 만들고 `--define MAILMAN_BUILD_VERSION`으로 버전을 주입한 뒤 ad-hoc 서명한다. 현재 아키텍처 바이너리로 최소 환경(`env -i`)에서 `--version`·`--help`를 스모크한다. `dist/`는 gitignore 대상이다. 컴파일된 실행 파일은 스크립트 위치(`import.meta.url`)에 의존하지 않는다.
 
 ## 설정과 경로
 
-`config.example.json`을 참고해 `config.json`에 `defaultSpace`와 `spaces.<별칭>.space`를 작성한다. 선택적인 `webhookUrl`은 카드 전송용이며 v2 텍스트 전송에서는 사용하지 않는다. 이전 설정/DB와 호환하지 않는다.
+설정 예시는 `config.example.json`이다. `defaultSpace`와 `spaces.<별칭>.space`를 작성한다. 선택적인 `webhookUrl`은 카드 전송용이며 v2 텍스트 전송에서는 사용하지 않는다. 이전 설정/DB와 호환하지 않는다.
 
 | 변수 | 기본값/용도 |
 |------|-------------|
 | `MAILMAN_HOME` | `~/.claude`, DB와 로그 루트 |
+| `MAILMAN_CONFIG` | `$MAILMAN_HOME/mailman/config.json`, 설정 파일 |
 | `MAILMAN_CLIENT_FILE` | `~/.claude/secrets/mailman-oauth.json`, Google `installed` 형식 |
 | `MAILMAN_TOKEN_FILE` | `~/.claude/secrets/mailman-token.json`, 0600 |
-| `MAILMAN_DEEP` | `1`이면 최근 30일 창 전체를 재수집 |
+| `MAILMAN_DEEP` | `1`이면 `--deep`과 같이 최근 30일 창 전체를 재수집 |
 | `MAILMAN_BACKFILL_DAYS` | 최초/DEEP 일수 오버라이드, 기본 7/30일, 1~36500 |
 
 - DB: `$MAILMAN_HOME/inbox/mailman-v2.db` (새 파일은 생성 시 0600, 기존 파일 권한은 유지)
@@ -87,6 +100,8 @@ meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)
 
 새 메시지를 `create_time`, `name` 오름차순으로 최대 200건 고른다. seen의 보조 이름이 있으면 같은 시각의 더 뒤 이름도 이어서 조회한다. 스레드는 그 스레드의 가장 이른 새 메시지순, 내부는 시간순으로 묶는다. 스레드 이름이 없는 메시지는 각각 독립 항목으로 취급한다. 새 답글 앞의 저장된 메시지 중 최근 5건을 **이전 맥락**으로 표시하고 나머지 생략 건수도 알린다. 이전 맥락은 새 메시지 상한에 포함하지 않는다. 상한으로 잘린 나중 답글은 이번 출력에 포함하지 않는다.
 
+`--only bot|human`은 새 메시지 선정(200건 상한과 남은 건수 포함)을 해당 `sender_type`으로 거른다. 이전 맥락은 유형과 무관하게 붙인다. `--only` 조회는 seen을 읽어 기준으로 쓰지만 **바꾸지 않는다**. 거른 조회로 전진하면 거른 쪽 메시지가 기본 조회에서 영구히 빠지기 때문이다. `--since`와 함께 쓰면 기간 기준으로 거른다. 상한 초과 시 `--since`가 있으면 기간을 좁히라고, `--only` 단독이면 seen이 바뀌지 않아 같은 메시지가 다시 나온다며 `--since`를 지정하거나 좁히라고 안내한다.
+
 출력 머리에 `thread_name`과 DB 기준 첫 메시지 `name`을 표시한다. 첫 메시지가 이전 맥락 제한으로 생략되어도 DB 기준 이름은 유지한다. 각 메시지에 시각·발신자 표시명(없으면 사용자 리소스 이름)·BOT/HUMAN 구분을 붙인다. 수집 창 밖의 메시지/원문이 없을 수 있다.
 
 stdout 쓰기가 완료된 뒤 실제 표시한 새 메시지의 최대 생성 시각까지 seen을 전진한다. 동시 조회에서도 더 뒤의 seen을 되돌리지 않는다. 출력 실패 또는 새 메시지 0건이면 seen은 그대로다. 빈 결과는 `[별칭] 새 메시지가 없습니다.`와 기존 수집 메타를 출력한다. 상한 초과 시 기본 조회는 `N건 더 남음 — 다시 실행하면 이어서` 안내를, 기간 조회는 `--since`를 좁히라는 안내를 출력한다.
@@ -99,12 +114,12 @@ stdout 쓰기가 완료된 뒤 실제 표시한 새 메시지의 최대 생성 �
 
 | 코드 | 의미 |
 |------|------|
-| 0 | 성공/help; `fetch.sh`는 수집 실패 후 기존 DB 출력도 성공으로 처리 |
-| 1 | 인자·설정·파일 권한 오류, 빈 전송 본문 |
-| 2 | 토큰 파일 없음 (`run.sh auth` 필요) |
+| 0 | 성공/help/버전; `mailman fetch`는 수집 실패 후 기존 DB 출력도 성공으로 처리 |
+| 1 | 인자·설정·파일 권한 오류, 잘못된 `--client` 파일, 빈 전송 본문 |
+| 2 | 토큰 파일 또는 OAuth 클라이언트 파일 없음 (`mailman auth` 필요) |
 | 3 | 재인증 필요, OAuth/HTTP/네트워크/페이지 수집 실패 |
 
-`fetch.sh`의 수집 오류는 stderr로 알린다. 조회 가능한 DB가 있으면 계속 출력하며, DB 자체가 깨져 읽을 수 없는 경우에는 실패한다.
+`mailman fetch`의 수집 오류는 stderr로 알린다. 조회 가능한 DB가 있으면 계속 출력하며, DB 자체가 깨져 읽을 수 없는 경우에는 실패한다.
 
 ## 검증
 

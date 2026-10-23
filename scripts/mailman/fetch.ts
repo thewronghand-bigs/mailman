@@ -7,7 +7,9 @@ import { normalizeTime } from "./time";
 
 export const MAX_NEW_MESSAGES = 200;
 const MAX_CONTEXT_MESSAGES = 5;
-export type InboxOptions = { spaceKey: string; space: string; since?: string; now?: Date };
+export type SenderType = "BOT" | "HUMAN";
+// only: 새 메시지를 해당 발신자 유형으로만 거른다. 이전 맥락은 유형과 무관하게 붙인다.
+export type InboxOptions = { spaceKey: string; space: string; since?: string; only?: SenderType; now?: Date };
 export type InboxThread = {
   name: string | null;
   firstMessageName: string;
@@ -32,8 +34,12 @@ export function queryInbox(db: Database, options: InboxOptions): InboxPage {
     const after = normalizeTime(options.since ?? seen ?? new Date((options.now ?? new Date()).getTime() - 86_400_000).toISOString());
     // 200건 경계에서 같은 시각의 메시지가 잘려도 다음 조회에서 이어서 보여준다.
     const afterName = seen ? getMeta(db, `seenMessageName:${options.space}`) ?? null : null;
-    const params: [string, string, string, string | null] = [options.space, after, after, afterName];
-    const condition = "space=? AND (create_time>? OR (create_time=? AND name>?))";
+    const params: Array<string | null> = [options.space, after, after, afterName];
+    let condition = "space=? AND (create_time>? OR (create_time=? AND name>?))";
+    if (options.only) {
+      condition += " AND sender_type=?";
+      params.push(options.only);
+    }
     const total = db.query<{ count: number }, typeof params>(`SELECT COUNT(*) AS count FROM messages WHERE ${condition}`).get(...params)!.count;
     const messages = db.query<MessageRow, [...typeof params, number]>(
       `SELECT * FROM messages WHERE ${condition} ORDER BY create_time ASC, name ASC LIMIT ?`,
@@ -93,12 +99,20 @@ function author(row: MessageRow): string {
   return row.sender_display_name || row.sender_name || "(이름 비공개)";
 }
 
+// 상한을 넘었을 때 다음 조회 방법. --only 조회는 seen을 바꾸지 않으므로 재실행해도 같은 메시지가 나온다.
+function remainingHint(options: InboxOptions): string {
+  if (options.since !== undefined) return "--since를 좁혀서 다시 조회하세요.";
+  if (options.only !== undefined) return "--only 조회는 seen을 바꾸지 않아 다시 실행해도 같은 메시지가 나옵니다. --since를 지정하거나 좁혀서 조회하세요.";
+  return "다시 실행하면 이어서 표시합니다.";
+}
+
 export function renderInbox(db: Database, options: InboxOptions, page = queryInbox(db, options)): string {
   const output: string[] = [];
   if (page.newCount === 0) {
-    output.push(`[${options.spaceKey}] 새 메시지가 없습니다.`);
+    output.push(`[${options.spaceKey}] 새 메시지가 없습니다.${options.only ? ` (${options.only}만 조회)` : ""}`);
   } else {
-    output.push(`[${options.spaceKey}] 새 메시지 ${page.newCount}건, ${page.threads.length}개 스레드 (오래된 새 메시지부터):\n`);
+    const filter = options.only ? ` (${options.only}만)` : "";
+    output.push(`[${options.spaceKey}] 새 메시지 ${page.newCount}건${filter}, ${page.threads.length}개 스레드 (오래된 새 메시지부터):\n`);
     for (const thread of page.threads) {
       const firstNew = thread.messages[0]!;
       output.push(`## ${firstNew.create_time} — ${author(firstNew)}`);
@@ -114,13 +128,10 @@ export function renderInbox(db: Database, options: InboxOptions, page = queryInb
       }
       output.push("\n---\n");
     }
-    if (page.remaining > 0) {
-      output.push(options.since === undefined
-        ? `${page.remaining}건 더 남음 — 다시 실행하면 이어서 표시합니다.\n`
-        : `${page.remaining}건 더 남음 — --since를 좁혀서 다시 조회하세요.\n`);
-    }
+    if (page.remaining > 0) output.push(`${page.remaining}건 더 남음 — ${remainingHint(options)}\n`);
   }
   output.push("## 메타");
+  if (options.only) output.push(`- 필터: ${options.only}만 표시 (seen 커서 유지)`);
   output.push(`- 마지막 성공 수집: ${getMeta(db, `lastSync:${options.space}`) ?? "(기록 없음)"}`);
   output.push(`- 수집 createTime 커서: ${getMeta(db, `lastCreateTime:${options.space}`) ?? "(기록 없음)"}`);
   return output.join("\n");
@@ -131,7 +142,8 @@ export async function printInbox(db: Database, options: InboxOptions, write: (te
   // 출력 완료(비동기 쓰기 포함)를 확인한 뒤에만 seen을 저장한다.
   await write(renderInbox(db, options, page));
   const last = page.lastNew;
-  if (options.since !== undefined || !last) return;
+  // 기간 조회와 --only 조회는 seen을 바꾸지 않는다. 거른 조회로 전진하면 거른 쪽 메시지가 기본 조회에서 영구히 빠진다.
+  if (options.since !== undefined || options.only !== undefined || !last) return;
   db.transaction(() => {
     const timeKey = `seenCreateTime:${options.space}`;
     const nameKey = `seenMessageName:${options.space}`;

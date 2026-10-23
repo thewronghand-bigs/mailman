@@ -1,0 +1,46 @@
+#!/bin/bash
+# mailman 개발용 실행기: bun을 찾아 레포의 cli.ts를 실행한다.
+# `install.sh --dev`가 ~/.claude/bin/mailman을 이 파일로 심볼릭 링크한다.
+# source하면 bun 탐색 함수(mailman_setup_path)만 정의하고 실행하지 않는다(build.sh·테스트에서 사용).
+
+# 로그인 셸 PATH가 없는 환경에서도 bun을 찾는다.
+mailman_setup_path() {
+  local candidate version
+  local search_path="$HOME/.bun/bin"
+  if [ -n "${NVM_BIN:-}" ]; then search_path="$search_path:$NVM_BIN"; fi
+
+  # nvm 버전은 문자열 순서가 아닌 major/minor/patch 숫자 내림차순으로 찾는다.
+  while IFS= read -r version; do
+    search_path="$search_path:$HOME/.nvm/versions/node/$version/bin"
+  done < <(
+    for candidate in "$HOME"/.nvm/versions/node/*/bin; do
+      [ -d "$candidate" ] || continue
+      version="${candidate%/bin}"
+      printf '%s\n' "${version##*/}"
+    done | LC_ALL=C sort -t . -k1.2,1nr -k2,2nr -k3,3nr
+  )
+
+  export PATH="$search_path:/opt/homebrew/bin:/usr/local/bin:$PATH"
+  if ! command -v bun >/dev/null 2>&1; then
+    echo "[mailman] bun을 찾을 수 없습니다. bun 설치와 PATH를 확인하세요." >&2
+    exit 1
+  fi
+}
+
+# 심볼릭 링크(~/.claude/bin/mailman)로 실행돼도 레포의 실제 위치를 찾는다.
+mailman_script_dir() {
+  local source="${BASH_SOURCE[0]}" dir
+  while [ -L "$source" ]; do
+    dir="$(cd -P "$(dirname "$source")" && pwd)"
+    source="$(readlink "$source")"
+    case "$source" in /*) ;; *) source="$dir/$source" ;; esac
+  done
+  cd -P "$(dirname "$source")" && pwd
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  set -euo pipefail
+  SCRIPT_DIR="$(mailman_script_dir)"
+  mailman_setup_path
+  exec bun "$SCRIPT_DIR/cli.ts" "$@"
+fi

@@ -1,7 +1,7 @@
 import { spyOn } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { SCOPES, saveToken, type OAuthClient } from "../auth";
 import type { ChatMessage } from "../chat";
 import type { Fetch } from "../http";
@@ -46,10 +46,11 @@ export function fixture(withCredentials = true) {
   // 레포 밖의 실제 설정이나 인증정보는 건드리지 않는다.
   const dir = mkdtempSync(join(dirname(fileURLToPath(import.meta.url)), ".mailman-test-"));
   directories.push(dir);
-  const paths = getRuntimePaths(pathToFileURL(join(dir, "cli.ts")).href, {
+  const paths = getRuntimePaths({
     MAILMAN_HOME: dir, MAILMAN_CLIENT_FILE: join(dir, "client.json"), MAILMAN_TOKEN_FILE: join(dir, "token.json"),
   });
-  writeFileSync(join(dir, "config.json"), JSON.stringify({ defaultSpace: "tn", spaces: { tn: { space: SPACE } } }));
+  mkdirSync(dirname(paths.configFile), { recursive: true });
+  writeFileSync(paths.configFile, JSON.stringify({ defaultSpace: "tn", spaces: { tn: { space: SPACE } } }));
   if (withCredentials) {
     writeFileSync(paths.clientFile, JSON.stringify({ installed: CLIENT }));
     saveToken(paths.tokenFile, { refresh_token: "fixture-refresh-secret", email: "tester@example.test", scopes: [...SCOPES] });

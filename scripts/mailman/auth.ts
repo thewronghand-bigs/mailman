@@ -3,7 +3,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { isRecord, MailmanError, registerSecret } from "./errors";
 import { requestJson, type Fetch } from "./http";
 import type { RuntimePaths } from "./runtime";
@@ -49,14 +49,14 @@ export function parseOAuthCallback(url: URL, expectedState: string): string {
   const state = Buffer.from(url.searchParams.get("state") ?? "");
   const expected = Buffer.from(expectedState);
   if (state.length !== expected.length || !timingSafeEqual(state, expected)) {
-    throw new MailmanError("OAuth state가 일치하지 않습니다. 다시 run.sh auth를 실행하세요.", 3);
+    throw new MailmanError("OAuth state가 일치하지 않습니다. 다시 mailman auth를 실행하세요.", 3);
   }
   if (url.searchParams.has("error")) {
-    throw new MailmanError("Google 인증이 거부되었습니다. 다시 run.sh auth를 실행하세요.", 3);
+    throw new MailmanError("Google 인증이 거부되었습니다. 다시 mailman auth를 실행하세요.", 3);
   }
   const code = url.searchParams.get("code");
   if (!code || url.searchParams.getAll("code").length !== 1 || url.searchParams.getAll("state").length !== 1) {
-    throw new MailmanError("OAuth 인증 코드가 없습니다. 다시 run.sh auth를 실행하세요.", 3);
+    throw new MailmanError("OAuth 인증 코드가 없습니다. 다시 mailman auth를 실행하세요.", 3);
   }
   return code;
 }
@@ -66,10 +66,10 @@ function checkScopes(scopes: string[]): string[] {
   const granted = [...new Set(scopes.map(scope => scope === "email" ? SCOPES[1] : scope))];
   const missing = SCOPES.filter(scope => !granted.includes(scope));
   if (missing.length > 0) {
-    throw new MailmanError(`필수 스코프가 빠졌습니다: ${missing.join(", ")}. 다시 run.sh auth를 실행하세요.`, 3);
+    throw new MailmanError(`필수 스코프가 빠졌습니다: ${missing.join(", ")}. 다시 mailman auth를 실행하세요.`, 3);
   }
   if (granted.some(scope => !(SCOPES as readonly string[]).includes(scope))) {
-    throw new MailmanError("허용 목록 밖의 OAuth 스코프가 있습니다. 이 클라이언트의 기존 동의를 취소한 뒤 다시 run.sh auth를 실행하세요.", 3);
+    throw new MailmanError("허용 목록 밖의 OAuth 스코프가 있습니다. 이 클라이언트의 기존 동의를 취소한 뒤 다시 mailman auth를 실행하세요.", 3);
   }
   return granted;
 }
@@ -87,7 +87,7 @@ export function loadClient(path: string): OAuthClient {
     throw new MailmanError("OAuth 클라이언트 파일을 읽을 수 없습니다. MAILMAN_CLIENT_FILE과 데스크톱 앱 JSON 파일을 확인하세요.");
   }
   if (!isRecord(value) || !isRecord(value.installed)) {
-    throw new MailmanError('OAuth 클라이언트는 Google의 {"installed": {...}} 형식이어야 합니다.');
+    throw new MailmanError('OAuth 클라이언트는 Google의 {"installed": {...}} 형식이어야 합니다. 클라이언트를 "데스크톱 앱" 유형으로 만들어 JSON을 다시 받으세요.');
   }
   const client = value.installed;
   if (typeof client.client_id !== "string" || !client.client_id || typeof client.client_secret !== "string" || !client.client_secret ||
@@ -105,38 +105,55 @@ export function loadToken(path: string): SavedToken {
     value = JSON.parse(readFileSync(path, "utf8"));
   } catch (error: unknown) {
     if (isRecord(error) && error.code === "ENOENT") {
-      throw new MailmanError("토큰 파일이 없습니다. 먼저 run.sh auth를 실행하세요.", 2);
+      throw new MailmanError("토큰 파일이 없습니다. 먼저 mailman auth를 실행하세요.", 2);
     }
-    throw new MailmanError("토큰 파일을 읽을 수 없습니다. 다시 run.sh auth를 실행하세요.", 3);
+    throw new MailmanError("토큰 파일을 읽을 수 없습니다. 다시 mailman auth를 실행하세요.", 3);
   }
   if (!isRecord(value) || typeof value.refresh_token !== "string" || !value.refresh_token ||
       typeof value.email !== "string" || !/^[^@\s]+@[^@\s]+$/.test(value.email) ||
       !Array.isArray(value.scopes) || !value.scopes.every((scope: unknown) => typeof scope === "string")) {
-    throw new MailmanError("토큰 파일 형식이 올바르지 않습니다. 다시 run.sh auth를 실행하세요.", 3);
+    throw new MailmanError("토큰 파일 형식이 올바르지 않습니다. 다시 mailman auth를 실행하세요.", 3);
   }
   registerSecret(value.refresh_token);
   return { refresh_token: value.refresh_token, email: value.email, scopes: checkScopes(value.scopes) };
 }
 
-export function saveToken(path: string, token: SavedToken): void {
-  registerSecret(token.refresh_token);
-  const temporary = join(dirname(path), `.mailman-token-${randomBytes(12).toString("hex")}`);
+// 검증한 클라이언트 JSON을 0600으로 복사한다. 원본 내용을 그대로 옮기며 출력하지 않는다.
+export function installClient(source: string, destination: string): void {
+  loadClient(source);
+  if (resolve(source) === resolve(destination)) {
+    chmodSync(destination, 0o600);
+    return;
+  }
+  writePrivateFile(destination, readFileSync(source), ".mailman-client-",
+    "OAuth 클라이언트 파일을 저장할 수 없습니다. MAILMAN_CLIENT_FILE의 디렉터리 권한을 확인하세요.");
+}
+
+// 0600 임시 파일을 만든 뒤 원자적으로 교체한다. 실패 메시지에는 파일 내용을 넣지 않는다.
+function writePrivateFile(path: string, content: string | Buffer, prefix: string, failure: string): void {
+  const temporary = join(dirname(path), `${prefix}${randomBytes(12).toString("hex")}`);
   let fd: number | undefined;
   try {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     fd = openSync(temporary, "wx", 0o600);
-    // 객체를 명시해서 access_token/id_token이 파일에 섞여 들어갈 수 없게 한다.
-    writeFileSync(fd, JSON.stringify({ refresh_token: token.refresh_token, email: token.email, scopes: token.scopes }, null, 2) + "\n");
+    writeFileSync(fd, content);
     closeSync(fd);
     fd = undefined;
     chmodSync(temporary, 0o600);
     renameSync(temporary, path);
   } catch {
-    throw new MailmanError("토큰 파일을 저장할 수 없습니다. MAILMAN_TOKEN_FILE의 디렉터리 권한을 확인하세요.");
+    throw new MailmanError(failure);
   } finally {
     if (fd !== undefined) closeSync(fd);
     try { unlinkSync(temporary); } catch { /* 이동 완료 또는 임시 파일 없음 */ }
   }
+}
+
+export function saveToken(path: string, token: SavedToken): void {
+  registerSecret(token.refresh_token);
+  // 객체를 명시해서 access_token/id_token이 파일에 섞여 들어갈 수 없게 한다.
+  writePrivateFile(path, JSON.stringify({ refresh_token: token.refresh_token, email: token.email, scopes: token.scopes }, null, 2) + "\n",
+    ".mailman-token-", "토큰 파일을 저장할 수 없습니다. MAILMAN_TOKEN_FILE의 디렉터리 권한을 확인하세요.");
 }
 
 async function tokenRequest(client: OAuthClient, params: Record<string, string>, fetcher: Fetch): Promise<Record<string, unknown>> {
@@ -148,11 +165,11 @@ async function tokenRequest(client: OAuthClient, params: Record<string, string>,
   if (isRecord(body) && typeof body.access_token === "string") registerSecret(body.access_token);
   if (isRecord(body) && typeof body.refresh_token === "string") registerSecret(body.refresh_token);
   if (isRecord(body) && body.error === "invalid_grant") {
-    throw new MailmanError("OAuth 인증이 만료되었거나 취소되었습니다. 다시 run.sh auth를 실행하세요.", 3);
+    throw new MailmanError("OAuth 인증이 만료되었거나 취소되었습니다. 다시 mailman auth를 실행하세요.", 3);
   }
   if (!response.ok || !isRecord(body) || typeof body.access_token !== "string" || !body.access_token) {
     // error_description에는 요청의 비밀값이 섞일 수 있어서 그대로 출력하지 않는다.
-    throw new MailmanError(`OAuth 토큰 발급 실패 (HTTP ${response.status}). OAuth 설정을 확인하거나 다시 run.sh auth를 실행하세요.`, 3);
+    throw new MailmanError(`OAuth 토큰 발급 실패 (HTTP ${response.status}). OAuth 설정을 확인하거나 다시 mailman auth를 실행하세요.`, 3);
   }
   return body;
 }
@@ -162,7 +179,7 @@ export async function exchangeCode(client: OAuthClient, code: string, redirectUr
     grant_type: "authorization_code", code, redirect_uri: redirectUri, code_verifier: verifier,
   }, fetcher);
   if (typeof body.refresh_token !== "string" || !body.refresh_token) {
-    throw new MailmanError("refresh token을 받지 못했습니다. 다시 run.sh auth를 실행해 동의하세요.", 3);
+    throw new MailmanError("refresh token을 받지 못했습니다. 다시 mailman auth를 실행해 동의하세요.", 3);
   }
   const scopes = scopesFromResponse(body);
   const accessToken = body.access_token as string;
@@ -214,11 +231,11 @@ async function receiveAuthorization(client: OAuthClient, pkce: Pkce): Promise<{ 
       resolveCode(code);
     } catch {
       response.writeHead(400, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" }).end("인증에 실패했습니다. 터미널에서 다시 시도하세요.");
-      rejectCode(new MailmanError("OAuth 콜백 검증에 실패했습니다. 다시 run.sh auth를 실행하세요.", 3));
+      rejectCode(new MailmanError("OAuth 콜백 검증에 실패했습니다. 다시 mailman auth를 실행하세요.", 3));
     }
   });
   server.on("error", () => rejectCode(new MailmanError("OAuth loopback 서버 오류가 발생했습니다.", 3)));
-  const timeout = setTimeout(() => rejectCode(new MailmanError("인증 대기 시간이 5분을 넘었습니다. 다시 run.sh auth를 실행하세요.", 3)), 5 * 60_000);
+  const timeout = setTimeout(() => rejectCode(new MailmanError("인증 대기 시간이 5분을 넘었습니다. 다시 mailman auth를 실행하세요.", 3)), 5 * 60_000);
   try {
     await new Promise<void>((resolve, reject) => {
       server.once("error", () => reject(new MailmanError("OAuth loopback 서버를 열 수 없습니다.")));

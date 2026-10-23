@@ -101,7 +101,7 @@ describe("토큰 교환과 저장", () => {
     catch (error: unknown) {
       expect(error).toBeInstanceOf(MailmanError);
       expect((error as MailmanError).exitCode).toBe(3);
-      expect(errorMessage(error)).toContain("다시 run.sh auth");
+      expect(errorMessage(error)).toContain("다시 mailman auth");
       expect(errorMessage(error)).not.toContain("fixture-refresh-secret");
     }
     expect(calls).toHaveLength(1);
