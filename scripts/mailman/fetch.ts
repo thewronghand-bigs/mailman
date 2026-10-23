@@ -44,37 +44,42 @@ export function queryInbox(db: Database, options: InboxOptions): InboxPage {
     const messages = db.query<MessageRow, [...typeof params, number]>(
       `SELECT * FROM messages WHERE ${condition} ORDER BY create_time ASC, name ASC LIMIT ?`,
     ).all(...params, MAX_NEW_MESSAGES);
-    const selected = new Map<string, InboxThread>();
-    // 입력이 새 메시지 시각순이므로 Map도 스레드의 가장 이른 새 메시지 시각순이다.
-    for (const row of messages) {
-      const key = threadKey(row);
-      let thread = selected.get(key);
-      if (!thread) {
-        thread = { name: row.thread_name, firstMessageName: row.name, messages: [], context: [], omittedContext: 0 };
-        selected.set(key, thread);
-      }
-      thread.messages.push(row);
-    }
-    const previousCondition = "space=? AND thread_name=? AND (create_time<? OR (create_time=? AND name<?))";
-    const previousMessages = db.query<MessageRow, [string, string, string, string, string, number]>(
-      `SELECT * FROM messages WHERE ${previousCondition} ORDER BY create_time DESC, name DESC LIMIT ?`,
-    );
-    const previousCount = db.query<{ count: number }, [string, string, string, string, string]>(
-      `SELECT COUNT(*) AS count FROM messages WHERE ${previousCondition}`,
-    );
-    const firstMessage = db.query<{ name: string }, [string, string]>(
-      "SELECT name FROM messages WHERE space=? AND thread_name=? ORDER BY create_time ASC, name ASC LIMIT 1",
-    );
-    for (const thread of selected.values()) {
-      if (thread.name === null) continue;
-      const firstNew = thread.messages[0]!;
-      const contextParams: [string, string, string, string, string] = [options.space, thread.name, firstNew.create_time, firstNew.create_time, firstNew.name];
-      thread.context = previousMessages.all(...contextParams, MAX_CONTEXT_MESSAGES).reverse();
-      thread.omittedContext = previousCount.get(...contextParams)!.count - thread.context.length;
-      thread.firstMessageName = firstMessage.get(options.space, thread.name)!.name;
-    }
-    return { threads: [...selected.values()], newCount: messages.length, remaining: total - messages.length, lastNew: messages.at(-1) };
+    return { ...groupMessages(db, options.space, messages), remaining: total - messages.length };
   })();
+}
+
+// 조회와 대기는 메시지 선정만 다르고 스레드·이전 맥락·본문 렌더링은 공유한다.
+export function groupMessages(db: Database, space: string, messages: MessageRow[]): InboxPage {
+  const selected = new Map<string, InboxThread>();
+  // 입력이 새 메시지 시각순이므로 Map도 스레드의 가장 이른 새 메시지 시각순이다.
+  for (const row of messages) {
+    const key = threadKey(row);
+    let thread = selected.get(key);
+    if (!thread) {
+      thread = { name: row.thread_name, firstMessageName: row.name, messages: [], context: [], omittedContext: 0 };
+      selected.set(key, thread);
+    }
+    thread.messages.push(row);
+  }
+  const previousCondition = "space=? AND thread_name=? AND (create_time<? OR (create_time=? AND name<?))";
+  const previousMessages = db.query<MessageRow, [string, string, string, string, string, number]>(
+    `SELECT * FROM messages WHERE ${previousCondition} ORDER BY create_time DESC, name DESC LIMIT ?`,
+  );
+  const previousCount = db.query<{ count: number }, [string, string, string, string, string]>(
+    `SELECT COUNT(*) AS count FROM messages WHERE ${previousCondition}`,
+  );
+  const firstMessage = db.query<{ name: string }, [string, string]>(
+    "SELECT name FROM messages WHERE space=? AND thread_name=? ORDER BY create_time ASC, name ASC LIMIT 1",
+  );
+  for (const thread of selected.values()) {
+    if (thread.name === null) continue;
+    const firstNew = thread.messages[0]!;
+    const contextParams: [string, string, string, string, string] = [space, thread.name, firstNew.create_time, firstNew.create_time, firstNew.name];
+    thread.context = previousMessages.all(...contextParams, MAX_CONTEXT_MESSAGES).reverse();
+    thread.omittedContext = previousCount.get(...contextParams)!.count - thread.context.length;
+    thread.firstMessageName = firstMessage.get(space, thread.name)!.name;
+  }
+  return { threads: [...selected.values()], newCount: messages.length, remaining: 0, lastNew: messages.at(-1) };
 }
 
 function attachmentNames(json: string): string[] {
@@ -144,9 +149,13 @@ export async function printInbox(db: Database, options: InboxOptions, write: (te
   const last = page.lastNew;
   // 기간 조회와 --only 조회는 seen을 바꾸지 않는다. 거른 조회로 전진하면 거른 쪽 메시지가 기본 조회에서 영구히 빠진다.
   if (options.since !== undefined || options.only !== undefined || !last) return;
+  advanceSeen(db, options.space, last);
+}
+
+export function advanceSeen(db: Database, space: string, last: Pick<MessageRow, "create_time" | "name">): void {
   db.transaction(() => {
-    const timeKey = `seenCreateTime:${options.space}`;
-    const nameKey = `seenMessageName:${options.space}`;
+    const timeKey = `seenCreateTime:${space}`;
+    const nameKey = `seenMessageName:${space}`;
     const current = getMeta(db, timeKey);
     const currentName = getMeta(db, nameKey);
     // 다른 조회가 먼저 저장한 더 뒤의 커서를 되돌리지 않는다.

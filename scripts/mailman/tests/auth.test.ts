@@ -34,6 +34,33 @@ describe("OAuth URL과 콜백", () => {
 });
 
 describe("토큰 교환과 저장", () => {
+  test("auth 응답 id_token의 sub를 users/ID로 저장하고 id_token은 남기지 않는다", async () => {
+    const paths = fixture();
+    const idToken = `fixture-header.${Buffer.from(JSON.stringify({ sub: "fixture-self" })).toString("base64url")}.fixture-signature`;
+    const api = mockFetch((_url, _init, index) => index === 0
+      ? json({ access_token: "fixture-access-secret", refresh_token: "fixture-refresh-secret", scope: SCOPES.join(" "), id_token: idToken })
+      : json({ email: "tester@example.test", email_verified: true, sub: "fixture-self" }));
+    const token = await exchangeCode(CLIENT, "fixture-code", "http://127.0.0.1:54321", "fixture-verifier", api.fetcher);
+    saveToken(paths.tokenFile, token);
+    expect(loadToken(paths.tokenFile).user_name).toBe("users/fixture-self");
+    const stored = readFileSync(paths.tokenFile, "utf8");
+    expect(stored).not.toContain("id_token");
+    expect(stored).not.toContain("access_token");
+    const refresh = mockFetch(() => json({ access_token: "fixture-next-access", refresh_token: "fixture-rotated-refresh" }));
+    await getAccessToken(paths, refresh.fetcher);
+    expect(loadToken(paths.tokenFile).user_name).toBe("users/fixture-self");
+    expect(loadToken(paths.tokenFile).refresh_token).toBe("fixture-rotated-refresh");
+  });
+
+  test("id_token과 userinfo의 sub가 다르거나 잘못되면 계정 ID를 저장하지 않는다", async () => {
+    for (const id_token of ["broken", `header.${Buffer.from(JSON.stringify({ sub: "fixture-other" })).toString("base64url")}.signature`]) {
+      const api = mockFetch((_url, _init, index) => index === 0
+        ? json({ access_token: "fixture-access-secret", refresh_token: "fixture-refresh-secret", scope: SCOPES.join(" "), id_token })
+        : json({ email: "tester@example.test", email_verified: true, sub: "fixture-self" }));
+      await expect(exchangeCode(CLIENT, "fixture-code", "http://127.0.0.1:54321", "fixture-verifier", api.fetcher)).rejects.toThrow("계정 ID");
+    }
+  });
+
   test("PKCE 코드 교환 후 검증된 이메일과 실제 허용 스코프를 받는다", async () => {
     const { fetcher, calls } = mockFetch((url, init, index) => {
       if (index === 0) {
@@ -47,10 +74,10 @@ describe("토큰 교환과 저장", () => {
       }
       expect(url.toString()).toBe("https://openidconnect.googleapis.com/v1/userinfo");
       expect(new Headers(init.headers).get("Authorization")).toBe("Bearer fixture-access-secret");
-      return json({ email: "tester@example.test", email_verified: true });
+      return json({ email: "tester@example.test", email_verified: true, sub: "fixture-self" });
     });
     const saved = await exchangeCode(CLIENT, "fixture-code", "http://127.0.0.1:54321", "fixture-verifier", fetcher);
-    expect(saved).toEqual({ refresh_token: "fixture-refresh-secret", email: "tester@example.test", scopes: [...SCOPES] });
+    expect(saved).toEqual({ refresh_token: "fixture-refresh-secret", email: "tester@example.test", scopes: [...SCOPES], user_name: "users/fixture-self" });
     expect(calls).toHaveLength(2);
   });
 

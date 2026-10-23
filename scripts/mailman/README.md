@@ -1,4 +1,4 @@
-# mailman v2 런타임
+# mailman v2.1 런타임
 
 Google Chat API를 사용자 OAuth로 호출하는 bun 런타임. 외부 의존성 없이 `bun:sqlite`와 node 표준 모듈을 사용한다. 배포본은 `cli.ts`를 `bun build --compile`한 단일 실행 파일이다. 설치는 [루트 가이드](../../INSTALL.md)를 참고한다.
 
@@ -8,9 +8,11 @@ Google Chat API를 사용자 OAuth로 호출하는 bun 런타임. 외부 의존�
 
 ```bash
 mailman auth [--client <client_secret.json>]
-mailman collect [스페이스별칭] [--deep]
-mailman fetch [스페이스별칭] [--since <기간|날짜>] [--only bot|human] [--no-collect] [--deep]
-printf '%s\n' '본문' | mailman send [스페이스별칭] [--thread spaces/.../threads/...] [--agent claude|codex] [--no-tag]
+mailman spaces [검색어] [--refresh]
+mailman collect [대상] [--dm <사람>] [--save <별칭>] [--deep]
+mailman fetch [대상] [--dm <사람>] [--save <별칭>] [--since <기간|날짜>] [--only bot|human] [--no-collect] [--deep]
+printf '%s\n' '본문' | mailman send [대상] [--dm <사람>] [--save <별칭>] [--thread spaces/.../threads/...] [--agent claude|codex] [--no-tag] [--dry-run | --wait]
+mailman wait [대상] [--dm <사람>] [--save <별칭>] [--thread spaces/.../threads/...] [--from <사람>] [--quiet 60s] [--timeout 30m] [--interval 15s]
 mailman --help
 mailman --version
 MAILMAN_BACKFILL_DAYS=60 mailman collect team --deep
@@ -18,7 +20,19 @@ MAILMAN_BACKFILL_DAYS=60 mailman collect team --deep
 
 개발 중에는 레포에서 `./mailman-dev <명령>`(또는 `bun cli.ts <명령>`)로 같은 CLI를 실행한다. `mailman-dev`는 `~/.bun/bin`, `NVM_BIN`, `~/.nvm/versions/node/*/bin`(버전 내림차순), `/opt/homebrew/bin`, `/usr/local/bin`, 기존 PATH 순서로 bun을 찾고 심볼릭 링크로 실행돼도 레포 위치를 찾는다. source하면 bun 탐색 함수 `mailman_setup_path`만 정의한다(`scripts/build.sh`에서 사용).
 
-각 명령은 `--help`를 지원한다. help·버전·인자 오류에서는 설정을 읽거나 인증·수집을 시도하지 않는다. 스페이스 생략 시 설정의 `defaultSpace`를 쓰고, 알 수 없는 별칭은 에러로 처리한다. 조회는 한 번에 새 메시지 최대 200건이다. `fetch`는 조회 전에 수집을 시도하며 `--no-collect`로 생략한다. `--deep`과 `--no-collect`는 함께 쓸 수 없다.
+각 명령은 `--help`를 지원한다. help·버전·옵션 해석 오류에서는 설정을 읽거나 인증·수집을 시도하지 않는다. 대상 생략 시 설정의 `defaultSpace`를 쓴다. 조회는 한 번에 새 메시지 최대 200건이다. `fetch`는 조회 전에 수집을 시도하며 `--no-collect`로 메시지 수집을 생략한다(대상 이름/DM 해석은 API를 호출할 수 있음). `--deep`과 `--no-collect`는 함께 쓸 수 없다.
+
+## 대상 해석
+
+`resolve.ts`를 collect/fetch/send/wait가 공유한다. config 별칭, 리터럴 `spaces/ID`, `--dm <사람>`, 스페이스 표시 이름 순서다. 위치 인자와 `--dm`은 배타적이다. 이름은 NFKC·소문자·공백 제거 후 정확 일치 우선, 없으면 부분 일치하며 유일해야 한다. 다중 후보는 이름·종류·ID를 안내하고 exit 1이다. 0개면 캐시를 한 번 새로 고치고 재시도하며, 그래도 없으면 `mailman spaces`를 안내한다. 빈 캐시도 가져온 상태를 기록해 매번 다시 요청하지 않는다.
+
+`spaces`는 설정 파일 없이 동작한다. `spaces.list`를 100개씩 최대 1,000페이지 받아 완전히 성공한 뒤 목록 캐시를 원자 교체한다. 검색은 표시 이름 부분 일치다. `--refresh` 또는 캐시가 없을 때만 API를 호출한다. `--dm`은 `users/ID`·이메일(`users/<이메일>`)을 그대로 쓰고, 사람 이름은 DB 발신자의 표시 이름을 정규화 정확 일치해 유일한 `sender_name`을 찾는다. 동명이인은 후보를 보여 주고 이메일을 요청한다. `spaces:findDirectMessage`의 404는 아직 DM이 없다는 안내이며 생성하지 않는다.
+
+위치 인자·`--dm`·`--from`·`--save`가 정규화 후 비면 설정/API 접근 전에 exit 1이다. 위치 인자 생략만 defaultSpace를 사용한다. 빈 표시 이름은 이름 매칭 후보에서 제외한다. 이름 해석 전 목록 캐시가 24시간을 초과했으면 한 번 갱신한다. 실패하면 기존 캐시를 유지하고 경고한다. 그 호출에서는 다시 갱신하지 않는다.
+
+미등록 방도 이번 호출에서만 수집·조회·전송한다. `--save`만 최신 config에 새 별칭을 추가한다. 기존 별칭 충돌은 거절하고 모든 다른 필드를 보존해 0600 임시 파일에서 원자 교체한다. 출력·전송 미리보기 첫 줄은 `[대상] 이름 (종류, spaces/...)`다. 기존 별칭·리터럴의 메타데이터가 캐시에 없을 때는 입력 이름과 `SPACE_TYPE_UNSPECIFIED`를 표시해 오프라인 조회를 유지한다. `spaces --refresh`로 보완할 수 있다. `send --dry-run`은 대상과 태그 적용 본문을 출력하고 전송하지 않는다.
+
+DM 대상에는 `DM: 입력 → users/ID`도 표시한다. `--dry-run --save`는 별칭 충돌을 검사하고 저장할 예정만 표시하며 config 내용·권한을 바꾸지 않는다.
 
 - `auth --client <파일>`: Google 데스크톱 앱(`installed`) 형식과 인증 주소를 검증한 뒤 클라이언트 파일 경로로 0600 원자 복사하고 로그인한다. 같은 경로면 권한만 맞춘다. 검증 실패 시 복사·로그인하지 않는다(exit 1).
 - `auth`: 기존 클라이언트 파일로 로그인한다. 파일이 없으면 설정 가이드 URL을 안내하고 exit 2.
@@ -57,7 +71,7 @@ MAILMAN_VERSION=2.1.0 bash ../build.sh   # 버전 덮어쓰기
 
 허용 스코프는 `openid`, `userinfo.email`, `chat.spaces.readonly`, `chat.messages.readonly`, `chat.messages.create`의 다섯 개다. `openid` 외에는 `https://www.googleapis.com/auth/` 접두사를 쓴다. 요청/허용 스코프를 검증하고, 검증된 계정 이메일은 Bearer 헤더로 호출한 Google userinfo에서 확인한다.
 
-토큰 파일은 `refresh_token`, `email`, `scopes`만 저장한다. 0600 임시 파일을 만든 뒤 원자적으로 교체한다. access token은 수집/전송 때마다 refresh로 발급하고 메모리에서만 쓴다. 원본 OAuth 에러, 토큰, client secret, webhook URL은 출력하지 않는다.
+토큰 파일은 `refresh_token`, `email`, `scopes`, `user_name`(`users/<Google 계정 sub>`)을 저장한다. auth는 토큰 응답의 id_token에서 sub를 읽고 userinfo의 sub와도 대조한다. id_token이 없으면 userinfo의 sub를 쓴다. 이전 토큰의 user_name은 첫 대기 때 userinfo를 한 번 호출해 보완한다. 0600 임시 파일을 만든 뒤 원자적으로 교체한다. access token은 수집/전송 때마다 refresh로 발급하고 메모리에서만 쓰며 id_token 원문도 저장하지 않는다. 원본 OAuth 에러, 토큰, client secret, webhook URL은 출력하지 않는다.
 
 ## 수집과 스키마
 
@@ -79,6 +93,7 @@ messages(
   fetched_at TEXT NOT NULL
 )
 meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)
+spaces(name TEXT PRIMARY KEY, display_name TEXT NOT NULL, space_type TEXT NOT NULL, updated_at TEXT NOT NULL)
 ```
 
 스페이스/작성 시각, 스페이스/스레드/작성 시각 인덱스를 가진다. 시각은 UTC·소수 9자리로 맞춰 Google의 나노초 정밀도를 잃지 않고 비교한다. `lastUpdateTime`이 없으면 생성 시각을 쓴다. `name`이 같고 내용이 바뀌었으면 갱신하되, 오래된 수정본은 최신 내용을 덮어쓰지 않는다. 동일 내용은 재저장하지 않는다.
@@ -95,7 +110,7 @@ meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)
 
 ## 조회와 전송
 
-수집 범위는 config에 등록한 스페이스로 정하고, 저장과 조회 모두 사람·봇·mailman 전송을 포함한다. 본문을 그대로 출력하며 작업 관련성은 이를 읽는 Claude가 판단한다.
+수집 범위는 기본/지정 별칭 또는 호출에서 이름·리터럴·DM으로 선택한 스페이스다. 저장과 조회 모두 사람·봇·mailman 전송을 포함한다. 본문을 그대로 출력하며 작업 관련성은 이를 읽는 Claude가 판단한다.
 
 기본 조회는 스페이스별 `seenCreateTime` 이후의 생성 시각을 가진 메시지다. 커서가 없으면 실행 시각의 24시간 전을 기준으로 쓴다. `--since 24h`, `3d`, `7d`는 실행 시각에서 양의 정수 시간/일을 빼고, `--since YYYY-MM-DD`는 실행 환경의 로컬 자정을 기준으로 쓴다. 기준 시각과 같은 메시지는 새 메시지에서 제외한다. 기간 조회는 seen을 읽거나 바꾸지 않는다. DEEP 수집 후에도 기본 조회는 안 읽은 메시지다.
 
@@ -111,6 +126,24 @@ stdout 쓰기가 완료된 뒤 실제 표시한 새 메시지의 최대 생성 �
 
 텍스트 전송은 로그인한 사용자 명의이며 본문 첫 줄 앞에 `[🤖 <라벨>] `을 한 번 붙인다(`content.ts`의 `sendPrefix`). 결정은 `runtime.ts`의 `resolveSendPrefix`가 한다: `--no-tag`면 태그 없음, 아니면 설정 `sendTag: false`면 태그 없음, 아니면 라벨을 `--agent` > `MAILMAN_AGENT` > 중립 `AI` 순으로 정한다(`claude`→`Claude`, `codex`→`Codex`, 그 밖의 값은 exit 1). `MAILMAN_AGENT`는 태그를 붙이고 `--agent`가 없을 때만 읽는다. `--no-tag`와 `--agent`를 같이 주면 인자 오류다. 태그 없이 보내면 성공 출력에 `태그 없이 전송했습니다 (--no-tag)` 또는 `(설정 sendTag: false)` 한 줄을 붙인다. 값 검증은 모두 refresh 전에 끝난다. `--thread`는 같은 스페이스의 리소스 이름이어야 하고 `REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD`로 전송한다. 성공 시 message/thread 이름을 출력한다. 실패 시 자동 재시도하지 않는다. 카드는 사용자 OAuth 범위 밖이며 [커맨드 문서](../../commands/mailman.md)의 웹훅 curl 절차를 사용한다.
 
+## 답장 대기
+
+`wait.ts`는 시계(`now`/`sleep`), API fetch, AbortSignal을 주입받는다. 단독 `wait`는 CLI 실행 시각, `send --wait`는 전송 응답의 createTime 이후를 고정 필터로 반복 조회한다. 먼저 일반 증분 수집으로 이전 안 읽은 메시지를 보충하고, 각 폴링 결과는 같은 upsert로 저장하되 수집 커서는 별도로 뛰어넘지 않는다. API에서 같은 메시지를 다시 받아도 quiet는 재시작하지 않는다.
+
+기본 `--quiet 60s --timeout 30m --interval 15s`이며 양의 정수 s/m/h를 받는다. timeout 상한은 2시간이며 초과하면 exit 1이다. 내 Google 계정 ID를 제외하고, thread/from이 있으면 해당 답장만 고른다. 새 답장을 발견할 때마다 quiet를 다시 센다. 마지막 답장부터 quiet가 지나면 묶음을 출력하며, 첫 답장부터 10분 또는 전체 timeout 중 빠른 시점에도 반환한다. quiet가 interval보다 짧으면 quiet 경계에 한 번 더 폴링한다. API 페이지 수신도 전체/묶음 제한 시각에 중단한다. timeout까지 답장이 없으면 `답장 없음`과 exit 4다.
+
+`--from`은 전송/대기 전에 ID로 확정한다. 이름은 수집된 sender_name으로, users/ID는 직접 비교한다. 이메일 발신자 별칭이 이미 DB에 있으면 그대로 비교하고, 없으면 기존 DM에서 내가 아닌 사람 발신자를 찾는다. DM의 수집 기록이 없으면 최근 메시지를 조회한다(기본 7일, `MAILMAN_BACKFILL_DAYS` 적용). 상대가 없거나 유일하지 않으면 전송하지 않고 수집된 정확한 이름이나 users/ID를 안내한다. 추가 스코프나 멤버 API 없이 정식 ID를 확인하기 위한 선택이다. 대기 중 발신자별 조회는 없으며 봇은 from과 일치하지 않는다. `send --wait`에서 sender.name이 계정 ID와 다르면 경고하고 두 ID 모두 내 메시지에서 제외한다. 전송 응답에 createTime이 없으면 전송 완료 정보와 재전송 금지 문구를 출력하고 exit 5다.
+
+폴링은 직전 수신의 최대 createTime 경계부터 조회한다. `createTime >` 필터의 경계를 1ns 겹치고 같은 시각의 수신 이름을 기억해 중복을 제거한다. 같은 시각에 작은 이름이 나중에 도착해도 포함하며 내 메시지·필터 제외 메시지도 수신 커서에는 반영한다. 준비 수집의 증분 커서와 대기의 수신 커서는 별개다.
+
+연결 오류·5xx·429는 interval부터 최대 60초까지 지수 백오프하며 남은 전체/묶음 시간과 연속 실패 5분 이내로 제한한다. 재시도는 비밀값을 지운 한 줄을 stderr와 로그에 남긴다. 연속 실패 5분, 재시도 중 제한 시간 도달, 영구 오류면 모은 답장을 먼저 출력하고 seen을 유지한 채 오류 종료한다. GET의 401은 refresh token으로 access token을 갱신한 뒤 1회만 재시도한다. 전송 POST는 재시도하지 않는다.
+
+출력은 `대기 전부터 있던 안 읽은 메시지` 다음 `답장 N건(조용해진 뒤 묶음)`이다. 제한 시간으로 묶었으면 그 이유를 표시한다. 이전 안 읽은 메시지는 seen(없으면 시작 24시간 전) 이후부터 시작 시각까지의 다른 사람 메시지이며 thread/from 필터는 이 섹션에 적용하지 않는다. 두 섹션 모두 기존 스레드·최근 5건 맥락·카드·첨부 렌더러를 쓴다. 대기 출력에는 200건 상한을 두지 않아 이전 미조회 메시지를 건너뛰지 않는다.
+
+두 섹션의 stdout 출력 성공 후 실제 표시한 메시지의 최대 시각·이름으로 seen을 전진한다. 다른 조회가 먼저 전진시킨 커서는 되돌리지 않는다. thread/from이 있는 대기는 seen을 유지한다. 대기 오류·출력 실패·SIGINT/SIGTERM에서는 seen을 바꾸지 않는다. 단독 wait의 시그널은 API 요청·sleep도 중단하고 130/143을 반환하며 리스너를 정리한다. 이미 수집한 DB 메시지는 남는다.
+
+`send --wait`는 전송 완료와 message/thread 이름을 항상 먼저 출력한다. 전송 완료 뒤 대기 오류·출력 실패·SIGINT/SIGTERM은 **exit 5: 전송은 완료됨 — 재전송하지 말 것**으로 구분한다. 정상적인 답장 없음은 exit 4이며 이때도 재전송하지 않는다. 전송 요청 도중 시그널은 130/143과 `전송 여부 불확실 — Chat에서 확인 후 재전송 판단`을 출력한다.
+
 ## 종료 코드
 
 | 코드 | 의미 |
@@ -119,6 +152,8 @@ stdout 쓰기가 완료된 뒤 실제 표시한 새 메시지의 최대 생성 �
 | 1 | 인자·설정·파일 권한 오류, 잘못된 `--client` 파일, 빈 전송 본문 |
 | 2 | 토큰 파일 또는 OAuth 클라이언트 파일 없음 (`mailman auth` 필요) |
 | 3 | 재인증 필요, OAuth/HTTP/네트워크/페이지 수집 실패 |
+| 4 | wait 또는 send --wait에서 timeout까지 답장 없음 (과거 안 읽은 메시지는 표시할 수 있음) |
+| 130 / 143 | SIGINT / SIGTERM으로 대기 중단, seen 불변 |
 
 `mailman fetch`의 수집 오류는 stderr로 알린다. 조회 가능한 DB가 있으면 계속 출력하며, DB 자체가 깨져 읽을 수 없는 경우에는 실패한다.
 

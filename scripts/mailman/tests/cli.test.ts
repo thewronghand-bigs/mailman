@@ -88,7 +88,7 @@ describe("CLI와 경로", () => {
     expect(await main(["fetch", "tn"], dependencies)).toBe(0);
     expect(readSeen()).toBe("2026-10-22T11:00:00.000000000Z");
     expect(await main(["fetch", "tn"], dependencies)).toBe(0);
-    expect(output.at(-1)).toStartWith("[tn] 새 메시지가 없습니다.");
+    expect(output.at(-1)).toStartWith(`[대상] tn (SPACE_TYPE_UNSPECIFIED, ${SPACE})\n[tn] 새 메시지가 없습니다.`);
     expect(readSeen()).toBe("2026-10-22T11:00:00.000000000Z");
     expect(calls).toHaveLength(0);
   });
@@ -221,11 +221,12 @@ describe("CLI와 경로", () => {
     const paths = fixture(false);
     const devRunner = join(import.meta.dir, "..", "mailman-dev");
     const cases: Array<[string[], number]> = [
-      [["--help"], 0], [["--version"], 0], [["auth", "--help"], 0], [["collect", "--help"], 0], [["fetch", "--help"], 0], [["send", "--help"], 0],
+      [["--help"], 0], [["--version"], 0], [["auth", "--help"], 0], [["collect", "--help"], 0], [["fetch", "--help"], 0], [["send", "--help"], 0], [["spaces", "--help"], 0], [["wait", "--help"], 0],
       [[], 1], [["bogus"], 1], [["run"], 1], [["auth", "extra"], 1], [["auth", "--client"], 1], [["collect", "--since", "7d"], 1],
       [["fetch", "tn", "3"], 1], [["fetch", "--all"], 1], [["fetch", "--since"], 1], [["fetch", "--since", "2026-02-30"], 1],
       [["fetch", "--only"], 1], [["fetch", "--only", "robot"], 1], [["fetch", "--deep", "--no-collect"], 1], [["send", "--thread"], 1],
       [["send", "--agent"], 1], [["send", "--agent", "gpt"], 1], [["send", "--no-tag", "--agent", "claude"], 1], [["send", "--no-tag", "--no-tag"], 1],
+      [["wait", "--timeout", "0s"], 1], [["wait", "tn", "--dm", "가온"], 1], [["spaces", "--dm", "가온"], 1],
     ];
     for (const [args, status] of cases) {
       const result = Bun.spawnSync(["bash", devRunner, ...args], {

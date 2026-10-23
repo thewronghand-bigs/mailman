@@ -1,6 +1,6 @@
 ---
 description: Google Chat API로 수집하고 mailman이 마지막으로 보여준 이후의 새 메시지 가져오기
-argument-hint: "[스페이스] [--since <기간|날짜>] [--only bot|human]  예: team / team --since 7d / team --only human"
+argument-hint: "[대상] [--dm <사람>] [--since <기간|날짜>] [--only bot|human]  예: team / '개발 팀' / --dm colleague@example.test"
 allowed-tools: Bash(~/.claude/bin/mailman:*)
 ---
 
@@ -32,7 +32,7 @@ allowed-tools: Bash(~/.claude/bin/mailman:*)
 
 ## 저장과 조회 대상
 
-수집 범위는 **config에 등록한 방**으로만 정한다. 그 방의 모든 메시지를 원문 그대로 저장하며 조회도 사람·봇·mailman 전송을 모두 포함한다. 무엇이 중요한지는 Claude가 출력 전체를 읽고 판단한다.
+수집 범위는 기본/지정 별칭 또는 해당 호출에서 이름·리터럴·`--dm`으로 선택한 방이다. 미등록 방도 그 호출에서만 사용하며 자동 등록하지 않는다. 그 방의 모든 메시지를 원문 그대로 저장하며 조회도 사람·봇·mailman 전송을 모두 포함한다. 무엇이 중요한지는 Claude가 출력 전체를 읽고 판단한다.
 
 스레드는 가장 이른 새 메시지 시각 기준 오래된 것부터, 내부는 시간순으로 출력한다. 오래된 스레드의 새 답글이면 직전의 저장된 메시지 중 최근 5건을 **이전 맥락**으로 함께 표시하고 나머지 생략 건수도 알린다. 출력 머리의 `thread_name`은 답글 전송에 사용하고 첫 메시지 `name`은 DB 기준이다. 각 메시지의 발신자 표시명과 `(BOT)`/`(HUMAN)` 구분을 참고한다. 수집 창 밖의 과거 원문/답글이 없으면 백필 기간을 늘려야 한다.
 
@@ -40,9 +40,13 @@ allowed-tools: Bash(~/.claude/bin/mailman:*)
 
 사용자가 "특정 발신자 메시지만 보여줘" 같이 요청하면 `/mailman` 결과에서 발신자 기준으로 필터링해서 보여주면 된다.
 
-## 스페이스 별칭
+## 대상 찾기
 
-설정 파일(`~/.claude/mailman/config.json`, `MAILMAN_CONFIG`로 변경 가능)의 `spaces`에 등록된 별칭을 쓴다. 생략하면 `defaultSpace`를 사용한다. 봇별칭 인자는 없다.
+**스페이스 ID를 사용자에게 묻지 않는다.** config 별칭 → `spaces/ID` → `--dm <사람>` → 스페이스 표시 이름 순으로 해석한다. 생략하면 `defaultSpace`다. 모르는 방은 `~/.claude/bin/mailman spaces '검색어'`로 찾고 필요하면 `--refresh`로 갱신한다. DM은 `--dm colleague@example.test`, `--dm '사람 이름'`, `--dm users/USER_ID`를 쓴다. 사람 이름은 수집된 발신자 기록에서 유일해야 하며, 없거나 동명이인이면 이메일로 구분한다. 기존 DM만 찾고 만들지 않는다.
+
+이름은 대소문자·공백을 무시한 정확 일치 우선, 없으면 부분 일치다. **후보가 여러 개면 이름·종류·ID 목록을 그대로 보여 주고 사용자에게 고르게 한다. 임의로 고르지 않는다.** 위치 인자와 `--dm`은 함께 쓰지 않는다. `--save <새 별칭>`을 명시할 때만 저장하고 기존 별칭을 덮어쓰지 않는다.
+
+모든 출력 첫 줄의 `[대상] 이름 (종류, spaces/...)`를 확인한다. 전송 초안에는 이 해석된 대상의 **이름·종류·ID를 반드시 표시**한다. `send --dry-run`에 승인 전 초안을 stdin으로 넣어 태그와 대상 미리보기를 확인할 수 있다. 별칭/리터럴이 `SPACE_TYPE_UNSPECIFIED`라면 `spaces --refresh`로 실제 표시 정보를 확인한 뒤 미리보기에 반영한다.
 
 최초 인증은 `~/.claude/bin/mailman auth --client <다운로드한 client_secret JSON>`([설정 가이드](https://thewronghand-bigs.github.io/mailman/setup) 참조). 토큰이 없거나 `invalid_grant` 안내가 나오면 `~/.claude/bin/mailman auth`(`--client` 없이)로 다시 인증한다.
 
@@ -74,7 +78,7 @@ allowed-tools: Bash(~/.claude/bin/mailman:*)
    [초안 내용]
    MAILMAN_EOF
    ```
-   `mailman send`는 **OAuth로 로그인한 사용자 명의**로 보내며, 본문 앞에 `[🤖 Claude] `(Codex는 `[🤖 Codex] `) 태그가 붙는다. 사용자가 설정에서 끈 경우(`sendTag: false`) 태그 없이 나간다. 초안 미리보기에도 이 태그와 전송 대상 스페이스/스레드를 명시한다.
+   `mailman send`는 **OAuth로 로그인한 사용자 명의**로 보내며, 본문 앞에 `[🤖 Claude] `(Codex는 `[🤖 Codex] `) 태그가 붙는다. 사용자가 설정에서 끈 경우(`sendTag: false`) 태그 없이 나간다. 초안 미리보기에도 이 태그와 `[대상] 이름 (종류, ID)`, 대상 스레드를 명시한다.
 
    원 스레드에 답글을 달려면 출력의 `thread_name`을 사용한다:
    ```bash
@@ -135,7 +139,7 @@ EOF
 
 ### 전송 절차 (승인 필수)
 
-1. **카드 페이로드 초안 작성** — 위 예시(또는 `local.md`의 카드 컨벤션)를 채워서 사용자에게 미리보기 (JSON 형태로) 한다.
+1. **카드 페이로드 초안 작성** — 위 예시(또는 `local.md`의 카드 컨벤션)를 채워서 사용자에게 미리보기 (JSON 형태로) 한다. 해석된 대상의 이름·종류·ID도 표시한다.
 2. **사용자 승인 요청** — "이 내용으로 Google Chat에 전송할까요?" 묻기. 톤/문구/이모지 변경 요청 시 반영 후 재승인.
 3. **전송 실행** — `curl` 명령으로 발사. webhook 응답에 `"name": "spaces/..."` 가 보이면 성공.
 
@@ -157,14 +161,22 @@ EOF
 2. **사용자 승인 요청** — "이 내용으로 Google Chat에 전송할까요?" 묻기.
    승인 전에는 절대 전송하지 않는다.
 
-3. **전송 실행** — 메시지를 가져온 스페이스로 전송. 원 스레드에 답하려면 위와 같은 `--thread` 옵션을 추가한다:
+3. **전송과 답장 대기** — 답장이 필요한 질문은 승인 후 `send --wait`를 쓴다. 원 스레드에 답하려면 `--thread`를 추가하고, 특정 사람 답장만 원하면 `--from <사람>`을 쓴다:
    ```
-   cat <<'MAILMAN_EOF' | ~/.claude/bin/mailman send [스페이스별칭] --agent claude
+   cat <<'MAILMAN_EOF' | ~/.claude/bin/mailman send [대상] --agent claude --wait --quiet 60s --timeout 30m --interval 15s
    [초안 내용]
    MAILMAN_EOF
    ```
 
-질문도 사용자 명의로 나가며, 본문 앞에 `[🤖 Claude] `(Codex는 `[🤖 Codex] `) 태그가 붙는다. 사용자가 설정에서 끈 경우(`sendTag: false`) 태그 없이 나간다. 태그와 스페이스/스레드를 초안에 표시하고, 전송 본문에는 태그를 중복해서 넣지 않는다. 사용자가 명시적으로 요청한 경우에만 질문을 보낸다. 자의적으로 질문을 생성하지 않는다.
+   **Claude Code에서는 위 Bash 도구 호출에 `run_in_background: true`를 지정**해 둔다. 셸의 `&`만 붙이지 않는다. 완료 알림이 오면 해당 작업의 출력 전체를 읽고, 짧게 이어진 답장을 한 묶음으로 이해한 뒤 구현·확인 작업을 이어 간다. 첫 답장 후 최대 10분/전체 timeout 중 빠른 시점에도 묶음을 반환한다. 질문을 다시 전송하지 않는다.
+
+   대기 전 안 읽은 메시지가 있으면 먼저 표시하고 이어서 `답장 N건(조용해진 뒤 묶음)`을 표시한다. 답장 없음은 exit 4이므로 질문은 이미 전송됐다는 사실과 함께 보고하고 재전송하지 않는다. **`send --wait`가 exit 5면 전송은 완료됨 — 재전송 금지.** 대기 오류·출력 실패·전송 후 SIGINT/SIGTERM도 exit 5다. 전송 요청 중 중단은 전송 여부가 불확실하므로 Chat에서 확인 후 재전송 여부를 판단한다. 단독 `wait`의 SIGINT/SIGTERM은 130/143이다. `--from`·`--thread` 대기, 대기 오류, 출력 실패, 중단은 seen을 유지한다. 이미 보낸 질문은 `~/.claude/bin/mailman wait [대상] --timeout 30m`으로 새 실행 시각부터 기다릴 수 있다.
+
+   `--timeout` 상한은 2시간이다. 연결 오류·5xx·429는 최대 60초 백오프로 재시도하고, 연속 실패 5분이면 받은 답장까지 출력한다. 401은 토큰 갱신 후 1회 재시도한다. `--from`은 전송 전에 확정하며 이메일은 기존 DM의 수집 기록 또는 최근 메시지에서 상대 ID를 찾는다(기본 7일, `MAILMAN_BACKFILL_DAYS` 적용). DM이 없거나 ID를 확정하지 못하면 전송하지 않는다. 그때는 수집된 정확한 이름이나 users/ID로 지정한다.
+
+   빈 대상·`--dm`·`--from`·`--save`는 인자 오류다. 이름 캐시는 24시간 초과 시 자동 갱신하며 실패하면 경고 후 기존 캐시를 쓴다. DM 미리보기의 해석된 users/ID를 확인한다. `--dry-run --save`는 저장할 예정 안내만 하고 config를 바꾸지 않는다.
+
+질문도 사용자 명의로 나가며, 본문 앞에 `[🤖 Claude] `(Codex는 `[🤖 Codex] `) 태그가 붙는다. 사용자가 설정에서 끈 경우(`sendTag: false`) 태그 없이 나간다. 태그와 해석된 대상의 이름·종류·ID/스레드를 초안에 표시하고, 전송 본문에는 태그를 중복해서 넣지 않는다. 사용자가 명시적으로 요청한 경우에만 질문을 보낸다. 자의적으로 질문을 생성하지 않는다.
 
 ## 공통 예외
 

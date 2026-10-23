@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { closeSync, mkdirSync, openSync } from "node:fs";
 import { dirname } from "node:path";
-import type { ChatMessage } from "./chat";
+import type { ChatMessage, ChatSpace } from "./chat";
 import { normalizeTime } from "./time";
 
 export type MessageRow = {
@@ -45,8 +45,33 @@ export function openDatabase(path: string): Database {
     CREATE INDEX IF NOT EXISTS idx_messages_space_time ON messages(space, create_time DESC);
     CREATE INDEX IF NOT EXISTS idx_messages_space_thread ON messages(space, thread_name, create_time);
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS spaces (
+      name TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      space_type TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
   return db;
+}
+
+export function cachedSpaces(db: Database): ChatSpace[] {
+  return db.query<ChatSpace, []>("SELECT name, display_name AS displayName, space_type AS spaceType FROM spaces ORDER BY display_name, name").all();
+}
+
+export function cacheSpaces(db: Database, spaces: ChatSpace[], updatedAt: string): void {
+  db.transaction(() => {
+    db.exec("DELETE FROM spaces");
+    for (const space of spaces) cacheSpace(db, space, updatedAt);
+    // 빈 목록도 아직 가져오지 않은 상태와 구별한다.
+    setMeta(db, "spacesUpdatedAt", updatedAt);
+  })();
+}
+
+export function cacheSpace(db: Database, space: ChatSpace, updatedAt: string): void {
+  db.query(`INSERT INTO spaces(name,display_name,space_type,updated_at) VALUES (?,?,?,?)
+    ON CONFLICT(name) DO UPDATE SET display_name=excluded.display_name, space_type=excluded.space_type, updated_at=excluded.updated_at`)
+    .run(space.name, space.displayName, space.spaceType, updatedAt);
 }
 
 export function getMeta(db: Database, key: string): string | undefined {
