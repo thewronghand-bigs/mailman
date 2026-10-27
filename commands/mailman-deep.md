@@ -4,9 +4,11 @@ argument-hint: "[대상] [--dm <사람>] [--since <기간|날짜>] [--only bot|h
 allowed-tools: Bash(~/.claude/bin/mailman:*)
 ---
 
-!`~/.claude/bin/mailman fetch --deep $ARGUMENTS`
+먼저 아래 명령으로 **최근 30일을 백필 재수집**한 뒤 조회하고, 출력 전체를 읽어 작업에 영향 주는 내용만 보고하세요.
 
-위는 mailman v2가 **최근 30일을 백필 재수집**한 뒤 조회한 메시지입니다. 출력 전체를 읽고 작업에 영향 주는 내용만 보고하세요.
+```bash
+~/.claude/bin/mailman fetch --deep $ARGUMENTS
+```
 
 ## Claude의 처리 절차
 

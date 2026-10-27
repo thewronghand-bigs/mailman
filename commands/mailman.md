@@ -1,12 +1,18 @@
 ---
-description: Google Chat API로 수집하고 mailman이 마지막으로 보여준 이후의 새 메시지 가져오기
+description: Google Chat 메시지 보내기와 받기 모두 담당. 사람·방 이름으로 DM/메시지 전송(첨부·리액션·답장 대기 포함), 새 메시지·스펙·핸드오버 조회. "○○님께 구글챗으로 보내/물어봐", "채팅 확인", "스펙 왔는지 봐줘" 같은 요청에 사용.
 argument-hint: "[대상] [--dm <사람>] [--since <기간|날짜>] [--only bot|human] [--with-attachments]"
 allowed-tools: Bash(~/.claude/bin/mailman:*)
 ---
 
-!`~/.claude/bin/mailman fetch $ARGUMENTS`
+## 먼저 할 일 — 요청이 조회인지 전송인지 가른다
 
-위는 Google Chat API로 수집한 메시지입니다. 출력 전체를 읽고 아래 처리 절차에 따라 작업에 영향 주는 내용만 보고하세요.
+- **조회**(새 메시지·스펙·핸드오버 확인, 인자만 주어진 `/mailman`): 아래 명령을 실행하고 그 출력을 처리 절차대로 읽는다.
+
+  ```bash
+  ~/.claude/bin/mailman fetch $ARGUMENTS
+  ```
+
+- **전송만**(누군가에게 보내기·묻기·파일 전달): `fetch`를 실행하지 않는다. 조회는 그 방의 seen 커서를 전진시켜 사용자가 아직 안 본 메시지를 본 것으로 처리하기 때문이다. 아래 "작업 완료 시 Google Chat 전송"·"텍스트 전송 서식" 절차대로 `mailman send`만 쓴다. 대상은 사람 이름(`--dm`)이나 방 이름으로 지정하고 스페이스 ID를 사용자에게 묻지 않는다.
 
 ## Claude의 처리 절차
 
