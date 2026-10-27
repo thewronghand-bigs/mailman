@@ -10,6 +10,7 @@ Google Chat API를 사용자 OAuth로 호출하는 bun 런타임. 외부 의존�
 mailman auth [--client <client_secret.json>]
 mailman doctor
 mailman spaces [검색어] [--refresh] [--save <별칭>] [--default]
+mailman create-space <표시 이름> --member <사람> [--member <사람> ...] [--save <별칭>] [--default] [--dry-run]
 mailman people [검색어]
 mailman people --forget <users/숫자ID>
 mailman collect [대상] [--dm <사람>] [--save <별칭>] [--default] [--deep]
@@ -52,9 +53,17 @@ DM 대상은 수집된 sender 표시명을 알면 `DM: 이름 → users/ID`, 모
 - `auth --client <파일>`: Google 데스크톱 앱(`installed`) 형식과 인증 주소를 검증한 뒤 클라이언트 파일 경로로 0600 원자 복사하고 로그인한다. 같은 경로면 권한만 맞춘다. 검증 실패 시 복사·로그인하지 않는다(exit 1).
 - `auth`: 기존 클라이언트 파일로 로그인한다. 파일이 없으면 설정 가이드 URL을 안내하고 exit 2.
 
+## 스페이스 생성
+
+`create-space.ts`는 표시 이름이 있는 `SPACE`만 만든다. 표시 이름과 `--member` 한 명 이상이 필수이며, 빈 값·공백만 있는 값은 인자 오류다. 멤버는 `--dm`과 같은 `resolveChatPerson`으로 users/ID·이메일 리터럴 → people 등록부 → 수집 발신자 → 회사 디렉터리 순으로 해석한다. 모든 멤버를 확정한 뒤 같은 ID와 알려진 이메일을 합쳐 최대 20명을 초대한다. 모호하거나 찾지 못한 멤버는 해당 `--member` 인자와 함께 오류를 표시하고 생성하지 않는다. 호출자는 자동 멤버이므로 본인 이메일·ID·이름을 지정하면 거절한다. 이전 토큰에 계정 ID가 없으면 userinfo로 한 번 확인해 보완한다.
+
+`ChatClient.setupSpace`와 `setupDirectMessage`는 공통 함수로 `POST /v1/spaces:setup`을 호출한다. 스페이스 생성 본문은 `{"space":{"spaceType":"SPACE","displayName":"<이름>"},"memberships":[{"member":{"name":"users/<ID>","type":"HUMAN"}}]}`다. 선택 `chat.spaces.create`가 없으면 exit 2와 `mailman auth` 재실행을 안내한다. 성공하면 표시 이름·spaces/ID·초대한 멤버 이름과 ID를 출력하고 스페이스를 캐시하며, 해석으로 확정된 사람은 기존 DM 규약대로 people에 등록한다. `--save`는 기존 별칭을 덮어쓰지 않으며 `--default`와 함께 기본 방을 지정할 수 있다.
+
+`--dry-run`은 이름·멤버·별칭 저장 예정만 보여 주고 생성·사람 등록·별칭 저장을 하지 않는다. Claude/Codex 커맨드·스킬은 이 미리보기를 보여 주고 사용자 승인 후 실행한다. 사용자가 이름·멤버를 명시해 생성하라고 요청했다면 그 요청을 승인으로 본다. 생성 POST는 자동 재시도하지 않으며, 응답 유실·실패 때는 Chat에서 생성 여부를 확인한 뒤 재실행하도록 안내한다. 생성 후 로컬 저장·출력만 실패했으면 생성 결과와 재생성 금지를 알린다.
+
 ## 설정 점검
 
-`doctor.ts`는 경로·0600 권한, 설정 JSON과 defaultSpace, 데스크톱 클라이언트, 토큰·필수/리액션/디렉터리/DM 생성 스코프, OAuth 갱신, `GET /v1/spaces?pageSize=1`을 순서대로 점검한다. 디렉터리 스코프가 있으면 이메일 앞부분으로 People API에 pageSize=1 요청을 한 번 한다. 선택 API 실패는 경고만 내며 전체 실패로 만들지 않는다. 파일·DB·권한·캐시·로그를 변경하지 않고 브라우저를 열지 않는다. 기본 방 메시지 조회는 하지 않는다. 파일 검증과 OAuth 갱신은 `auth.ts`, API 호출은 `chat.ts`를 공유하며 실제 네트워크 없이 fetch를 주입해 검증한다.
+`doctor.ts`는 경로·0600 권한, 설정 JSON과 defaultSpace, 데스크톱 클라이언트, 토큰·필수/리액션/디렉터리/스페이스·DM 생성 스코프, OAuth 갱신, `GET /v1/spaces?pageSize=1`을 순서대로 점검한다. 디렉터리 스코프가 있으면 이메일 앞부분으로 People API에 pageSize=1 요청을 한 번 한다. 선택 API 실패는 경고만 내며 전체 실패로 만들지 않는다. 파일·DB·권한·캐시·로그를 변경하지 않고 브라우저를 열지 않는다. 기본 방 메시지 조회는 하지 않는다. 파일 검증과 OAuth 갱신은 `auth.ts`, API 호출은 `chat.ts`를 공유하며 실제 네트워크 없이 fetch를 주입해 검증한다.
 
 실패가 있으면 exit 1, 경고만 있으면 0이다. 설정 파일·DB 없음과 예시 자리표시 기본 방·0600이 아닌 권한·리액션 스코프 없음은 경고다. 클라이언트 없음은 받은 JSON의 8단계 등록 또는 처음 만드는 6단계, web 유형은 6단계를 안내한다. 갱신의 invalid_client/deleted_client/unauthorized_client는 새 JSON을 받거나 만들어 auth --client로 등록하도록 6단계를 안내한다. invalid_grant는 기존 5단계 게시·재인증 안내를 유지한다. 설정 오류가 있어도 독립적인 인증 점검은 계속하고, 클라이언트·토큰 실패 뒤에는 갱신/API를 건너뛴다. 응답 원문을 출력하지 않고 원인과 [설정 가이드](https://thewronghand-bigs.github.io/mailman/setup)의 단계 링크만 표시한다. 게시 상태·브라우저 계정·관리자 콘솔은 조회하지 않는다.
 

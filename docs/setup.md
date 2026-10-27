@@ -139,7 +139,7 @@ https://console.cloud.google.com/auth/scopes?project=<PROJECT_ID>
 | `https://www.googleapis.com/auth/chat.messages.create` | 승인된 메시지·첨부 전송 |
 | `https://www.googleapis.com/auth/chat.messages.reactions.create` | 리액션 (선택) |
 | `https://www.googleapis.com/auth/directory.readonly` | 회사 디렉터리 이름·이메일 검색 (v2.4 선택) |
-| `https://www.googleapis.com/auth/chat.spaces.create` | 첫 DM 생성 (v2.4 선택) |
+| `https://www.googleapis.com/auth/chat.spaces.create` | 첫 DM 생성, 이름 있는 스페이스 생성·멤버 초대 (v2.4 선택) |
 
 기존 필수 권한은 앞의 다섯 개입니다. 선택 스코프가 없어도 기존 조회·전송은 동작하며, 필요한 기능을 쓸 때만 재인증을 안내합니다. 이 콘솔 설정도 프로젝트 소유자가 한 번만 합니다.
 

@@ -36,6 +36,8 @@ mailman spaces                                             # 내가 속한 스�
 mailman spaces '개발 팀' --refresh                          # 이름 검색, 목록 갱신
 mailman spaces '개발 팀' --save dev                         # 별칭 저장 (첫 별칭이 기본 방)
 mailman spaces --save dev --default                        # 기존 별칭을 기본 방으로 변경
+mailman create-space '새 프로젝트' --member '사람 이름' --member colleague@example.test --save project --dry-run  # 이름·멤버 미리보기
+mailman create-space '새 프로젝트' --member '사람 이름' --member colleague@example.test --save project            # 승인한 스페이스 생성·초대
 mailman people                                             # 등록된 사람의 이름·ID·이메일·출처
 mailman people '검색어'                                     # 등록부 검색 (네트워크 없음)
 mailman people --forget users/100001                        # 한 사람의 등록 삭제
@@ -71,6 +73,8 @@ mailman --version
 
 `send`는 DM이 없으면 선택 권한 `chat.spaces.create`로 만든 뒤 전송합니다. `--dry-run`은 `새 DM을 만들어 보냄` 미리보기만 표시하고 DM 생성·사람 등록을 하지 않습니다. `fetch`·`collect`·`wait`는 기존 DM만 사용합니다. `mailman people [검색어]`는 등록된 사람의 이름·users/ID·이메일·출처를 보여 주고, `people --forget users/숫자ID`는 한 명의 등록을 지웁니다(메시지는 유지). 디렉터리 후보 전체는 저장하지 않고 확정된 한 명만 저장합니다.
 
+`mailman create-space <표시 이름> --member <사람> [--member <사람> ...] [--save <별칭>] [--default] [--dry-run]`으로 이름 있는 스페이스(`SPACE`)를 만들고 멤버를 초대합니다. 이름은 필수이며 멤버는 `--dm`과 같은 경로로 해석하고, 중복을 합쳐 1~20명을 지정합니다. 호출자는 자동 멤버이므로 본인을 지정하면 오류입니다. 한 명이라도 모호하거나 찾지 못하면 생성하지 않습니다. `--dry-run`은 이름·멤버 목록만 미리 보고 생성·사람 등록·별칭 저장을 하지 않습니다. Claude/Codex는 미리보기를 보여 주고 승인 후 실행하며, 이름·멤버를 명시해 만들라는 요청은 승인으로 봅니다. 성공하면 표시 이름·spaces/ID·초대한 멤버를 보여 주고 방을 캐시합니다. `--save`는 새 별칭만 저장하고 `--default`로 기본 방을 정합니다. 생성 권한이 없으면 재인증을 안내합니다. 생성 POST는 자동 재시도하지 않으며 실패하면 Chat에서 생성 여부를 확인한 뒤 재실행하세요.
+
 config에 없는 방도 해당 호출에서 사용할 수 있습니다. `--save <새 별칭>`을 붙일 때만 별칭을 저장하며, 기존 별칭은 덮어쓰지 않습니다. 출력 첫 줄의 `[대상] 이름 (종류, spaces/...)`를 확인하세요. 별칭·리터럴의 표시 정보가 캐시에 없으면 입력 이름과 `SPACE_TYPE_UNSPECIFIED`를 표시합니다. `mailman spaces --refresh`로 표시 정보를 채울 수 있습니다.
 
 설치기는 설정 파일을 만들지 않습니다. 첫 `--save`가 0600 설정 파일을 만들며 **처음 저장한 별칭이 기본 방**입니다. 대상을 생략하면 이 방을 사용합니다. **바꾸려면 `--save <별칭> --default`**를 붙이세요. 새 대상을 저장하면서 기본으로 정하거나 `mailman spaces --save dev --default`로 기존 별칭의 기본 지정만 바꿀 수 있습니다. 기존 별칭의 `space` 값과 다른 필드는 보존하며, 다른 방으로 덮어쓰는 요청은 거절합니다. `config.example.json`은 문서 참고용입니다.
@@ -101,7 +105,7 @@ curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/inst
 
 ### 개인 컨벤션 (`local.md`)
 
-`$MAILMAN_HOME/mailman/local.md`(기본 `~/.claude/mailman/local.md`)를 만들어 두면 `/mailman`·`/mailman-deep`·`$mailman`이 커맨드 문서보다 먼저 읽고 우선해 따릅니다. 카드 제목·헤더 이미지·섹션 구성·색상, 보고 말투처럼 사람마다 다른 취향을 여기에 적습니다. 레포 문서에는 중립적인 최소 예시만 둡니다. 없으면 무시합니다. 전송 전 사용자 승인·✅ 리액션 승인·첨부 파일 제한·웹훅 URL 비노출 규칙은 `local.md`로 완화할 수 없습니다.
+`$MAILMAN_HOME/mailman/local.md`(기본 `~/.claude/mailman/local.md`)를 만들어 두면 `/mailman`·`/mailman-deep`·`$mailman`이 커맨드 문서보다 먼저 읽고 우선해 따릅니다. 카드 제목·헤더 이미지·섹션 구성·색상, 보고 말투처럼 사람마다 다른 취향을 여기에 적습니다. 레포 문서에는 중립적인 최소 예시만 둡니다. 없으면 무시합니다. 전송·스페이스 생성 전 사용자 승인·✅ 리액션 승인·첨부 파일 제한·웹훅 URL 비노출 규칙은 `local.md`로 완화할 수 없습니다.
 
 ## Codex에서 쓰기
 
@@ -158,9 +162,9 @@ network_access = true
 
 ## 인증과 전송
 
-인증은 임의 포트 `127.0.0.1` loopback, PKCE S256, state 검증을 사용합니다. refresh token·이메일·허용 스코프·Google 계정 ID(`user_name: users/<sub>`)를 0600 파일에 저장하며, access token은 매 실행마다 새로 발급받아 메모리에서만 사용합니다. 기존 토큰에 계정 ID가 없으면 첫 대기 때 userinfo로 한 번 보완합니다. id_token 원문은 저장하지 않습니다.
+인증은 임의 포트 `127.0.0.1` loopback, PKCE S256, state 검증을 사용합니다. refresh token·이메일·허용 스코프·Google 계정 ID(`user_name: users/<sub>`)를 0600 파일에 저장하며, access token은 매 실행마다 새로 발급받아 메모리에서만 사용합니다. 기존 토큰에 계정 ID가 없으면 첫 대기나 스페이스 생성 시 userinfo로 한 번 보완합니다. id_token 원문은 저장하지 않습니다.
 
-요청 스코프는 다음 여덟 개입니다. 기존 필수 권한 4개+`openid`는 그대로이며, 리액션·디렉터리 검색·DM 생성 권한은 선택입니다.
+요청 스코프는 다음 여덟 개입니다. 기존 필수 권한 4개+`openid`는 그대로이며, 리액션·디렉터리 검색·스페이스·DM 생성 권한은 선택입니다.
 
 - `openid`
 - `https://www.googleapis.com/auth/userinfo.email`
@@ -169,7 +173,7 @@ network_access = true
 - `https://www.googleapis.com/auth/chat.messages.create`
 - `https://www.googleapis.com/auth/chat.messages.reactions.create` (선택: 리액션)
 - `https://www.googleapis.com/auth/directory.readonly` (선택: 회사 디렉터리 이름·이메일 검색)
-- `https://www.googleapis.com/auth/chat.spaces.create` (선택: 첫 DM 생성)
+- `https://www.googleapis.com/auth/chat.spaces.create` (선택: 이름 있는 스페이스 생성·멤버 초대, 첫 DM 생성)
 
 기존 사용자는 v2.4 기능을 쓰기 전에 클라이언트 프로젝트의 **People API 사용 설정**과 **Google Auth Platform 데이터 액세스의 두 스코프 추가**를 마친 뒤 `mailman auth`를 다시 실행하세요([업그레이드 안내](https://thewronghand-bigs.github.io/mailman/setup#upgrade-v2-4)). 동료 프로젝트를 쓰면 콘솔 설정은 프로젝트 소유자가 한 번만 하고 각자 재인증합니다. 선택 권한이 없는 토큰도 기존 조회·전송·대기는 정상 동작하며, 해당 기능을 사용할 때만 안내합니다. 리액션 권한도 필요할 때 재인증하면 됩니다.
 

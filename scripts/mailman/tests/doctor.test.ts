@@ -234,7 +234,7 @@ describe("doctor 인증과 건너뜀", () => {
     expect(result.exit).toBe(0);
     expect(result.text).toContain("⚠️ 리액션 스코프 없음 — react만 불가");
     expect(result.text).toContain("⚠️ 디렉터리 검색 스코프 없음");
-    expect(result.text).toContain("⚠️ DM 생성 스코프 없음");
+    expect(result.text).toContain("⚠️ 스페이스·DM 생성 스코프 없음");
     expect(result.text).toContain(guide(8));
     expect(result.calls).toHaveLength(2);
   });

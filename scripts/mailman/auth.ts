@@ -88,7 +88,7 @@ export function requireReactionScope(tokenFile: string): void {
 
 export function requireSpaceCreateScope(tokenFile: string): void {
   if (!loadToken(tokenFile).scopes.includes(SPACE_CREATE_SCOPE)) {
-    throw new MailmanError(`DM 생성 권한이 없습니다 (${SPACE_CREATE_SCOPE}). mailman auth를 다시 실행하세요.`, 2);
+    throw new MailmanError(`스페이스·DM 생성 권한이 없습니다 (${SPACE_CREATE_SCOPE}). mailman auth를 다시 실행하세요.`, 2);
   }
 }
 

@@ -1,7 +1,8 @@
 // 컴파일된 실행 파일과 개발 실행기(mailman-dev)가 함께 쓰는 단일 진입점.
 import { existsSync, readFileSync } from "node:fs";
 import { authenticate, DIRECTORY_SCOPE, getAccessToken, getSelfUser, installClient, loadToken, requireReactionScope, requireSpaceCreateScope } from "./auth";
-import { ChatClient, SentMessageError, type CreatedMessage } from "./chat";
+import { ChatClient, MAX_SPACE_MEMBERS, SentMessageError, type CreatedMessage } from "./chat";
+import { createSpace } from "./create-space";
 import { collectMessages, logCollection, logCollectionFailure, logWaitWarning } from "./collector";
 import { errorMessage, MailmanError, throwIfAborted } from "./errors";
 import { printInbox, type SenderType } from "./fetch";
@@ -25,7 +26,7 @@ import type { Database } from "bun:sqlite";
 declare const MAILMAN_BUILD_VERSION: string | undefined;
 export const VERSION = typeof MAILMAN_BUILD_VERSION === "string" ? MAILMAN_BUILD_VERSION : packageJson.version;
 
-export type Command = "auth" | "doctor" | "spaces" | "people" | "collect" | "fetch" | "send" | "wait" | "download" | "react";
+export type Command = "auth" | "doctor" | "spaces" | "create-space" | "people" | "collect" | "fetch" | "send" | "wait" | "download" | "react";
 export type Arguments = {
   help: boolean;
   spaceKey?: string;
@@ -35,6 +36,7 @@ export type Arguments = {
   client?: string;
   agent?: SendAgent;
   dm?: string;
+  members?: string[];
   forget?: string;
   save?: string;
   makeDefault?: boolean;
@@ -56,13 +58,13 @@ export type Arguments = {
   tag: boolean;
 };
 
-const COMMANDS: readonly Command[] = ["auth", "doctor", "spaces", "people", "collect", "fetch", "send", "wait", "download", "react"];
+const COMMANDS: readonly Command[] = ["auth", "doctor", "spaces", "create-space", "people", "collect", "fetch", "send", "wait", "download", "react"];
 const TARGET_COMMANDS: readonly Command[] = ["collect", "fetch", "send", "wait"];
-const ALIAS_COMMANDS: readonly Command[] = ["spaces", ...TARGET_COMMANDS];
+const ALIAS_COMMANDS: readonly Command[] = ["spaces", "create-space", ...TARGET_COMMANDS];
 
 const SAVE_HELP = `--save <별칭>: 해석된 대상을 설정에 0600으로 원자 저장. 처음 저장한 별칭이 기본 방.
 --save <별칭> --default: 기본 방 변경. 기존 별칭은 같은 방일 때 기본 방만 변경하며 space 값은 덮어쓰지 않음.
-대상을 생략한 --save <기존 별칭> --default는 그 별칭을 선택. send --dry-run은 별칭·기본 방 모두 변경하지 않음.`;
+대상을 생략한 --save <기존 별칭> --default는 그 별칭을 선택. --dry-run은 별칭·기본 방 모두 변경하지 않음.`;
 const TARGET_HELP = `대상: config 별칭 → spaces/ID → --dm <users/ID|이메일|사람 이름> → 스페이스 표시 이름.
 명시 대상은 설정 파일 없이 동작. 생략할 때만 defaultSpace 필요.
 사람 이름: 등록된 사람 → 수집 발신자 → 회사 디렉터리(선택 권한 필요). 확정한 사람은 로컬에 등록 (--dry-run 제외).
@@ -86,6 +88,7 @@ export const USAGE = `mailman — Google Chat 스페이스 메시지를 로컬�
   auth [--client <client_secret.json>]    Google 로그인. --client로 OAuth 클라이언트 JSON을 등록
   doctor                                 설정·인증·Chat API 접근 점검과 해결 단계 안내
   spaces [검색어] [--refresh] [--save <별칭>] [--default]  스페이스 목록·검색·별칭 저장
+  create-space <표시 이름> --member <사람> ... [옵션]  이름 있는 스페이스 생성·멤버 초대
   people [검색어] [--forget <users/ID>]     등록된 사람 목록·검색·삭제
   collect [스페이스] [--deep]              Chat API 증분 수집 (--deep: 최근 30일 백필)
   fetch [스페이스] [옵션]                  수집 후 새 메시지 조회
@@ -118,6 +121,13 @@ ${TARGET_HELP}`,
 캐시가 없거나 --refresh면 Google Chat API 목록을 최대 1,000페이지 받아 DB 캐시를 교체.
 --save는 config 별칭·spaces/ID·표시 이름을 해석. 표시 이름은 정확 일치 우선, 없으면 부분 일치하며 후보가 유일해야 저장.
 ${SAVE_HELP}`,
+  "create-space": `사용: mailman create-space <표시 이름> --member <사람> [--member <사람> ...] [--save <별칭>] [--default] [--dry-run]
+표시 이름이 있는 SPACE를 만들고 중복을 제외한 1~${MAX_SPACE_MEMBERS}명의 멤버를 초대. 호출자는 자동 멤버이므로 본인 지정은 인자 오류.
+--member: --dm과 같은 users/ID·이메일 리터럴 → people 등록부 → 수집 발신자 → 회사 디렉터리 해석. 중복은 한 명으로 합침.
+모든 멤버가 유일하게 확정돼야 생성. --dry-run은 이름·멤버만 미리 보고 생성·사람 등록·별칭 저장하지 않음.
+실제 생성에는 chat.spaces.create 권한이 필요하며 없으면 mailman auth 재실행 안내.
+--save는 새 별칭만 저장하며 --default와 함께 기본 방 지정. 기존 별칭은 덮어쓰지 않음.
+생성 POST는 재시도하지 않음. 실패하면 Chat에서 생성 여부를 확인한 뒤 재실행하세요.`,
   people: `사용: mailman people [검색어]
 등록된 사람의 이름·users/ID·이메일·출처(sender|directory|manual)를 출력. 검색은 공백·대소문자를 무시한 부분 일치.
 mailman people --forget <users/숫자ID>: 한 명의 등록만 삭제. 수집된 메시지는 유지.
@@ -214,6 +224,10 @@ export function parseArguments(command: Command, args: string[], now = new Date(
       result.client = value(++index, "--client 뒤에 Google에서 받은 client_secret JSON 경로를 지정하세요.");
     } else if (arg === "--dm" && TARGET_COMMANDS.includes(command) && result.dm === undefined) {
       result.dm = value(++index, "--dm 뒤에 사람 이름, 이메일 또는 users/ID를 지정하세요.");
+    } else if (arg === "--member" && command === "create-space") {
+      const member = value(++index, "--member 뒤에 사람 이름, 이메일 또는 users/ID를 지정하세요.");
+      requireName(member, "--member");
+      (result.members ??= []).push(member);
     } else if (arg === "--forget" && command === "people" && result.forget === undefined) {
       result.forget = value(++index, "--forget 뒤에 users/숫자ID를 지정하세요.");
       if (!/^users\/\d+$/.test(result.forget)) throw new MailmanError("--forget은 users/숫자ID 형식으로 지정하세요.");
@@ -225,7 +239,7 @@ export function parseArguments(command: Command, args: string[], now = new Date(
       result.refresh = true;
     } else if (arg === "--wait" && command === "send" && !result.wait) {
       result.wait = true;
-    } else if (arg === "--dry-run" && command === "send" && !result.dryRun) {
+    } else if (arg === "--dry-run" && (command === "send" || command === "create-space") && !result.dryRun) {
       result.dryRun = true;
     } else if ((command === "send" || command === "wait") && ["--from", "--quiet", "--timeout", "--interval"].includes(arg)) {
       const next = value(++index, `${arg} 뒤에 값을 지정하세요.`);
@@ -249,8 +263,9 @@ export function parseArguments(command: Command, args: string[], now = new Date(
   // 태그를 끄면서 라벨을 지정하는 것은 의도가 충돌하므로 한쪽을 무시하지 않고 거절한다.
   if (result.agent !== undefined && !result.tag) throw new MailmanError("--agent와 --no-tag는 함께 쓸 수 없습니다.");
   result.spaceKey = positional[0];
+  if (command === "create-space" && (result.spaceKey === undefined || !result.members?.length)) throw new MailmanError(HELP[command]);
   if (result.forget !== undefined && result.spaceKey !== undefined) throw new MailmanError("people 검색어와 --forget은 함께 쓸 수 없습니다.");
-  for (const [label, entry] of [[command === "spaces" ? "검색어" : "대상", result.spaceKey], ["--dm", result.dm], ["--from", result.from], ["--save", result.save]]) {
+  for (const [label, entry] of [[command === "spaces" ? "검색어" : command === "create-space" ? "표시 이름" : "대상", result.spaceKey], ["--dm", result.dm], ["--from", result.from], ["--save", result.save]]) {
     if (entry !== undefined) requireName(entry, label!);
   }
   if (result.makeDefault && result.save === undefined) throw new MailmanError("--default는 --save <별칭>과 함께 쓰세요.");
@@ -382,6 +397,15 @@ export async function main(args: string[], dependencies: Dependencies = {}): Pro
       db = openDatabase(paths.dbPath);
       const spaces = searchSpaces(await listSpaces(db, getClient, options.refresh, now), options.spaceKey);
       await out(spaces.length ? spaces.map(space => `- ${formatSpace(space)}`).join("\n") : "일치하는 스페이스가 없습니다. mailman spaces --refresh로 확인하세요.");
+      return 0;
+    }
+    if (command === "create-space") {
+      db = openDatabase(paths.dbPath);
+      await createSpace(db, getClient, paths, { displayName: options.spaceKey!, members: options.members!, save: options.save,
+        makeDefault: options.makeDefault, dryRun: options.dryRun }, async () => {
+        await getClient();
+        return getSelfUser(paths, await accessToken!, fetcher);
+      }, out, now);
       return 0;
     }
     const config = loadConfig(paths.configFile);

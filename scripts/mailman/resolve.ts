@@ -69,9 +69,9 @@ function literalPerson(value: string): string | undefined {
   if (/^[^@\s/]+@[^@\s/]+$/.test(value)) return `users/${value}`;
 }
 
-function uniquePerson(people: Person[]): Person | undefined {
+function uniquePerson(people: Person[], exact = true): Person | undefined {
   const users = [...new Map(people.map(person => [person.userName, person])).values()];
-  if (users.length > 1) throw new MailmanError(`같은 이름의 사람이 여러 명입니다. 이메일 또는 users/ID로 지정하세요.\n${users.map(formatPerson).join("\n")}`);
+  if (users.length > 1) throw new MailmanError(`${exact ? "같은 이름의 사람이 여러 명입니다." : "이름이 일치하는 후보가 여러 명입니다."} 이메일 또는 users/ID로 지정하세요.\n${users.map(formatPerson).join("\n")}`);
   return users[0];
 }
 
@@ -96,8 +96,11 @@ export function resolvePerson(db: Database, value: string): string {
   throw new MailmanError("수집된 발신자 기록에서 사람을 찾을 수 없습니다. 이메일로 지정하세요.");
 }
 
-async function resolveDmPerson(db: Database, client: ClientProvider, value: string,
-  options: { dryRun?: boolean; directoryEnabled?: () => boolean }, now: Date): Promise<{ userName: string; displayName: string }> {
+export type ResolvedChatPerson = { userName: string; displayName: string; registration?: Person };
+
+export async function resolveChatPerson(db: Database, client: ClientProvider, value: string,
+  options: { directoryEnabled?: () => boolean }, now: Date): Promise<ResolvedChatPerson> {
+  requireName(value, "사람");
   const literal = literalPerson(value);
   if (literal) return { userName: literal, displayName: value };
   let person = knownPerson(db, value);
@@ -109,12 +112,15 @@ async function resolveDmPerson(db: Database, client: ClientProvider, value: stri
     const normalized = normalizeName(value);
     const exact = found.filter(candidate => normalizeName(candidate.displayName) === normalized);
     const candidates = exact.length ? exact : found.filter(candidate => normalizeName(candidate.displayName).includes(normalized));
-    person = uniquePerson(candidates.map(candidate => ({ ...candidate, source: "directory", updatedAt: now.toISOString() })));
+    person = uniquePerson(candidates.map(candidate => ({ ...candidate, source: "directory", updatedAt: now.toISOString() })), exact.length > 0);
     if (!person) throw new MailmanError("디렉터리에서 찾지 못함 (관리자가 디렉터리 공유를 막았을 수 있음). 이메일로 지정하세요.");
   }
+  return { userName: person.userName, displayName: person.displayName, registration: { ...person, updatedAt: now.toISOString() } };
+}
+
+export function rememberPerson(db: Database, person: ResolvedChatPerson): void {
   // 이메일 별칭 등 예전 sender 값은 그대로 해석하되 정식 숫자 ID만 등록한다.
-  if (!options.dryRun && /^users\/\d+$/.test(person.userName)) upsertPerson(db, { ...person, updatedAt: now.toISOString() });
-  return person;
+  if (person.registration && /^users\/\d+$/.test(person.userName)) upsertPerson(db, person.registration);
 }
 
 // 이메일 별칭 자체에는 정식 ID가 없다. 기존 DM의 발신자로 전송 전에 확정한다.
@@ -164,7 +170,8 @@ export async function resolveTarget(config: MailmanConfig, db: Database | undefi
   }
   if (!db) throw new MailmanError("대상 이름 해석에 필요한 DB를 열 수 없습니다.");
   if (options.dm !== undefined) {
-    const person = await resolveDmPerson(db, client, options.dm, options, now);
+    const person = await resolveChatPerson(db, client, options.dm, options, now);
+    if (!options.dryRun) rememberPerson(db, person);
     let space: ChatSpace;
     try { space = await (await client()).findDirectMessage(person.userName); }
     catch (error: unknown) {

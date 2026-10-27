@@ -155,7 +155,7 @@ describe("사람 등록과 해석 순서", () => {
       upsertPerson(db, { ...person(OTHER), email: "other@example.test" });
       const before = registeredPeople(db);
       await expect(resolveTarget({ defaultSpace: "", spaces: {}, sendTag: true }, db, async () => { throw new Error("API 금지"); },
-        { dm: "가 온", directoryEnabled: () => { throw new Error("스코프 조회 금지"); } }, NOW)).rejects.toThrow("other@example.test");
+        { dm: "가 온", directoryEnabled: () => { throw new Error("스코프 조회 금지"); } }, NOW)).rejects.toThrow(/같은 이름의 사람이 여러 명입니다\.[\s\S]*other@example\.test/);
       expect(registeredPeople(db)).toEqual(before);
     } finally { db.close(); }
   });
@@ -210,12 +210,13 @@ describe("회사 디렉터리 검색", () => {
     expect(api.calls.some(call => call.url.hostname !== "oauth2.googleapis.com" && call.init.method === "POST")).toBe(false);
   });
 
-  for (const names of [["가온", "가 온"], ["가온 첫째", "가온 둘째"]]) {
+  for (const [names, explanation] of [[["가온", "가 온"], "같은 이름의 사람이 여러 명입니다"], [["가온 첫째", "가온 둘째"], "이름이 일치하는 후보가 여러 명입니다"]] as const) {
     test(`동명이인·부분 일치 다중 후보(${names.join(", ")})는 저장하거나 전송하지 않는다`, async () => {
       const paths = fixture();
       const api = setupApi([profile("100001", names[0]!, "one@example.test"), profile("100002", names[1]!, "two@example.test")]);
       const errors: string[] = [];
       expect(await main(["send", "--dm", "가온"], { paths, env: {}, fetcher: api.fetcher, stdin: () => "본문", stderr: text => errors.push(text) })).toBe(1);
+      expect(errors.join("\n")).toContain(explanation);
       for (const value of [USER, OTHER, "one@example.test", "two@example.test"]) expect(errors.join("\n")).toContain(value);
       expect(readPeople(paths.dbPath)).toEqual([]);
       expect(api.calls).toHaveLength(2);

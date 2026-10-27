@@ -112,8 +112,8 @@ export async function runDoctor(paths: RuntimePaths, version: string, fetcher: F
     else await report("⚠️", "리액션 스코프 없음 — react만 불가. 필요하면 mailman auth를 다시 실행하세요.", 8);
     if (token.scopes.includes(DIRECTORY_SCOPE)) await report("✅", "디렉터리 검색 스코프: 있음.");
     else await report("⚠️", "디렉터리 검색 스코프 없음 — 등록되지 않은 사람 이름의 회사 디렉터리 검색만 불가. 필요하면 mailman auth를 다시 실행하세요.", 8);
-    if (token.scopes.includes(SPACE_CREATE_SCOPE)) await report("✅", "DM 생성 스코프: 있음.");
-    else await report("⚠️", "DM 생성 스코프 없음 — 새 DM 생성만 불가. 필요하면 mailman auth를 다시 실행하세요.", 8);
+    if (token.scopes.includes(SPACE_CREATE_SCOPE)) await report("✅", "스페이스·DM 생성 스코프: 있음.");
+    else await report("⚠️", "스페이스·DM 생성 스코프 없음 — 스페이스·새 DM 생성 불가. 필요하면 mailman auth를 다시 실행하세요.", 8);
   }
 
   let accessToken: string | undefined;

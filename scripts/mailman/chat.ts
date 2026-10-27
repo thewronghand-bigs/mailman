@@ -1,4 +1,4 @@
-import { isRecord, MailmanError, RequestError, registerSecret } from "./errors";
+import { errorMessage, isRecord, MailmanError, RequestError, registerSecret } from "./errors";
 import { chatError, requestBytes, requestJson, requestUploadJson, type Fetch, type TimeoutScheduler } from "./http";
 import { parseMessageName, validateSpace, validateThread } from "./runtime";
 import { parseEmoji, type ReactionEmoji } from "./react";
@@ -26,6 +26,7 @@ export type CreatedMessage = { name: string; thread: { name: string }; createTim
 export type ChatSpace = { name: string; displayName: string; spaceType: string };
 export type DirectoryPerson = { userName: string; displayName: string; email: string | null };
 export const MAX_PAGES = 1000;
+export const MAX_SPACE_MEMBERS = 20;
 
 // People API 오류 원문은 분류에만 쓰고 고정 안내만 출력한다.
 export function directoryErrorMessage(error: unknown): string {
@@ -246,16 +247,30 @@ export class ChatClient {
 
   async setupDirectMessage(user: string): Promise<ChatSpace> {
     if (!/^users\/[A-Za-z0-9_.@+-]+$/.test(user)) throw new MailmanError("DM 상대는 users/ID 또는 이메일 별칭이어야 합니다.");
+    return this.setupSpaceWithMembers({ spaceType: "DIRECT_MESSAGE" }, [user]);
+  }
+
+  async setupSpace(displayName: string, members: string[]): Promise<ChatSpace> {
+    if (!displayName.normalize("NFKC").trim()) throw new MailmanError("표시 이름은 비어 있지 않은 값을 지정하세요.");
+    if (!members.length || members.length > MAX_SPACE_MEMBERS) throw new MailmanError(`멤버는 1~${MAX_SPACE_MEMBERS}명 지정하세요.`);
+    if (members.some(user => !/^users\/[A-Za-z0-9_.@+-]+$/.test(user))) throw new MailmanError("멤버는 users/ID 또는 이메일 별칭이어야 합니다.");
+    return this.setupSpaceWithMembers({ spaceType: "SPACE", displayName }, members);
+  }
+
+  private async setupSpaceWithMembers(requested: { spaceType: "SPACE" | "DIRECT_MESSAGE"; displayName?: string }, members: string[]): Promise<ChatSpace> {
     try {
       const space = parseSpace(await this.request(new URL("https://chat.googleapis.com/v1/spaces:setup"), {
-        method: "POST", body: JSON.stringify({ space: { spaceType: "DIRECT_MESSAGE" }, memberships: [{ member: { name: user, type: "HUMAN" } }] }),
+        method: "POST", body: JSON.stringify({ space: requested, memberships: members.map(name => ({ member: { name, type: "HUMAN" } })) }),
       }));
-      return { ...space, spaceType: "DIRECT_MESSAGE" };
+      return { ...space, displayName: space.displayName || requested.displayName || "", spaceType: requested.spaceType };
     } catch (error: unknown) {
       if (error instanceof RequestError && error.status === 403) {
-        throw new RequestError("HTTP 403: DM 생성 권한이 부족합니다. chat.spaces.create 권한과 관리자 정책을 확인하고 mailman auth를 다시 실행하세요.", 403, error.apiStatus, error.apiReasons);
+        throw new RequestError(`HTTP 403: ${requested.spaceType === "DIRECT_MESSAGE" ? "DM" : "스페이스"} 생성 권한이 부족합니다. chat.spaces.create 권한과 관리자 정책을 확인하고 mailman auth를 다시 실행하세요.`, 403, error.apiStatus, error.apiReasons);
       }
-      throw error;
+      // 응답이 유실돼도 생성됐을 수 있으므로 POST는 재시도하지 않는다.
+      const message = `${errorMessage(error)}\nChat에서 생성 여부를 확인한 뒤 재실행하세요.`;
+      if (error instanceof RequestError) throw new RequestError(message, error.status, error.apiStatus, error.apiReasons);
+      throw new MailmanError(message, error instanceof MailmanError ? error.exitCode : 3);
     }
   }
 

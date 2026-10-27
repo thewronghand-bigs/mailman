@@ -8,6 +8,7 @@ permalink: /
 **mailman**은 Google Chat 스페이스의 메시지를 내 Mac의 로컬 SQLite에 모아 두고, Claude Code의 `/mailman` 슬래시 커맨드, Codex의 `$mailman` 스킬, 또는 터미널에서 조회·전송하는 macOS용 CLI입니다.
 
 - **첫 DM**: 처음 보내는 사람도 이름만으로 회사 디렉터리에서 찾고 DM을 만들어 보냅니다. 확정한 한 명만 로컬에 등록해 다음 세션부터 바로 찾습니다.
+- **스페이스 생성**: 이름 있는 스페이스를 만들고 지정한 사람들을 초대합니다. 이름·멤버 미리보기와 사용자 승인 절차를 따릅니다.
 - **대상 찾기**: 스페이스 표시 이름이나 사람 이름·이메일로 찾습니다. 명시 대상은 config 없이 동작하고, 원하면 새 방 별칭으로 저장합니다.
 - **사람 등록부**: `mailman people [검색어]`로 이름·ID·이메일·출처를 보고 `--forget users/숫자ID`로 지웁니다.
 - **조회**: 선택한 스페이스의 새 메시지를 스레드 단위로 정리해 보여 줍니다. 사람/봇 메시지만 골라 볼 수도 있습니다(`--only human`, `--only bot`).
@@ -49,6 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/inst
 mailman auth [--client <client_secret.json>]
 mailman doctor
 mailman spaces [검색어] [--refresh] [--save <별칭>] [--default]
+mailman create-space <표시 이름> --member <사람> [--member <사람> ...] [--save <별칭>] [--default] [--dry-run]
 mailman people [검색어]
 mailman people --forget <users/숫자ID>
 mailman collect [대상] [--dm <사람>] [--save <별칭>] [--default] [--deep]
@@ -63,6 +65,8 @@ mailman --help | --version
 `send`는 로그인한 사용자 명의로 보내며 본문 앞에 `[🤖 AI] ` 태그를 붙입니다(`--agent claude`면 `[🤖 Claude] `, `--agent codex`면 `[🤖 Codex] `). 태그는 설정 `"sendTag": false`로 끄거나 `--no-tag`로 이번 전송만 뺄 수 있습니다.
 
 `mailman send --dm '사람 이름' --agent codex < 본문.txt`는 등록된 사람 → 수집 발신자 → 회사 디렉터리 순서로 상대를 찾습니다. 동명이인은 이메일·ID 후보를 표시해 선택하게 합니다. DM이 없으면 전송할 때만 만들며, `--dry-run`은 `새 DM을 만들어 보냄` 미리보기만 표시하고 사람·방을 저장하지 않습니다. `fetch`·`collect`·`wait`는 DM을 만들지 않습니다. 디렉터리 검색과 DM 생성 스코프가 없는 기존 토큰도 나머지 기능은 동작합니다.
+
+`mailman create-space '새 프로젝트' --member '사람 이름' --member colleague@example.test --save project --dry-run`으로 만들 이름과 멤버를 확인합니다. `--member`는 `--dm`과 같은 경로로 해석하며, 중복을 합쳐 1~20명을 초대합니다. 호출자는 자동 멤버이며 본인 지정·모호한 후보·미발견 멤버가 있으면 생성하지 않습니다. 이름 없는 그룹 채팅은 만들지 않습니다. 미리보기는 생성·사람 등록·별칭 저장을 하지 않으며, 승인 후 `--dry-run`을 빼 실행합니다. 사용자가 이름·멤버를 명시해 만들라고 했다면 그 요청이 승인입니다. 선택 `chat.spaces.create` 권한이 없으면 재인증을 안내합니다. 성공하면 표시 이름·spaces/ID·멤버를 출력하고 방을 캐시합니다. `--save`는 새 별칭을 저장하고 `--default`와 함께 기본 방을 지정합니다. 생성 요청은 자동 재시도하지 않으므로 실패하면 Chat에서 생성 여부를 확인한 뒤 재실행하세요.
 
 `send --attach ./handover.md`로 지정한 일반 파일을 최대 10개·각 200MB까지 전송합니다. 심볼릭 링크는 거절하며 미리보기·성공 출력의 경로는 실제 경로(realpath)입니다. 모든 파일 검증과 업로드가 성공한 뒤에만 메시지를 생성하며 업로드 실패 시 메시지는 보내지 않습니다. 본문이 없으면 태그만, 태그가 꺼져 있으면 첨부만 보냅니다. `--dry-run`은 업로드 없이 경로·이름·크기를 표시하고 성공 출력은 파일 이름과 실제 경로를 나열합니다. Claude/Codex는 이 목록을 전송 승인에 포함하고 사용자가 지정하지 않은 파일은 첨부하지 않습니다. .env·키·토큰·자격증명 파일은 첨부하지 않고 경고합니다. 작성 요청을 받은 핸드오버 md는 먼저 파일로 쓴 뒤 경로를 승인받아 첨부합니다. 기존 전송 권한만 사용합니다.
 
