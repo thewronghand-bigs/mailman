@@ -56,11 +56,12 @@ export function loadConfig(configFile: string): MailmanConfig {
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(configFile, "utf8"));
-  } catch {
+  } catch (error: unknown) {
+    if (isRecord(error) && error.code === "ENOENT") return { defaultSpace: "", spaces: {}, sendTag: true };
     throw new MailmanError(`설정 파일을 읽을 수 없습니다: ${configFile}. 설정 가이드(${SETUP_GUIDE_URL}#step-10)의 방 등록 안내를 확인하세요.`);
   }
-  if (!isRecord(parsed) || typeof parsed.defaultSpace !== "string" || !isRecord(parsed.spaces)) {
-    throw new MailmanError(`설정 파일에 defaultSpace와 spaces가 필요합니다. 설정 가이드(${SETUP_GUIDE_URL}#step-10)의 방 등록 안내를 확인하세요.`);
+  if (!isRecord(parsed) || (parsed.defaultSpace !== undefined && typeof parsed.defaultSpace !== "string") || !isRecord(parsed.spaces)) {
+    throw new MailmanError(`설정 파일에 spaces와 선택적인 defaultSpace 문자열이 필요합니다. 설정 가이드(${SETUP_GUIDE_URL}#step-10)의 방 등록 안내를 확인하세요.`);
   }
   const spaces: Record<string, MailmanSpace> = Object.create(null);
   for (const [alias, value] of Object.entries(parsed.spaces)) {
@@ -72,16 +73,20 @@ export function loadConfig(configFile: string): MailmanConfig {
     if (typeof value.webhookUrl === "string") registerSecret(value.webhookUrl);
     spaces[alias] = { space: value.space, webhookUrl: value.webhookUrl as string | undefined };
   }
-  if (!Object.hasOwn(spaces, parsed.defaultSpace)) {
+  const defaultSpace = typeof parsed.defaultSpace === "string" ? parsed.defaultSpace : "";
+  if (defaultSpace && !Object.hasOwn(spaces, defaultSpace)) {
     throw new MailmanError("defaultSpace가 spaces에 등록된 별칭과 일치하지 않습니다.");
   }
   const sendTag: unknown = parsed.sendTag === undefined ? true : parsed.sendTag;
   if (typeof sendTag !== "boolean") throw new MailmanError("설정 파일의 sendTag는 true 또는 false여야 합니다.");
-  return { defaultSpace: parsed.defaultSpace, spaces, sendTag };
+  return { defaultSpace, spaces, sendTag };
 }
+
+export const MISSING_TARGET = "대상을 지정하거나 mailman spaces '검색어' --save <별칭>으로 기본 방을 등록하세요.";
 
 export function resolveSpace(config: MailmanConfig, requestedKey?: string) {
   const spaceKey = requestedKey ?? config.defaultSpace;
+  if (requestedKey === undefined && !spaceKey) throw new MailmanError(MISSING_TARGET);
   if (!Object.hasOwn(config.spaces, spaceKey)) {
     throw new MailmanError("등록되지 않은 스페이스 별칭입니다. 설정 파일의 spaces를 확인하세요.");
   }

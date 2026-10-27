@@ -70,11 +70,12 @@ describe("사용자 리액션", () => {
     expect(loadToken(paths.tokenFile).scopes).toEqual([...REQUIRED_SCOPES]);
   });
 
-  test("auth 요청은 기존 네 권한+openid와 선택 리액션만, 필수 검사에는 기존 다섯만 쓴다", async () => {
+  test("auth는 선택 권한도 요청하고 필수 검사에는 기존 다섯만 쓴다", async () => {
     expect([...REQUIRED_SCOPES]).toEqual(["openid", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/chat.spaces.readonly", "https://www.googleapis.com/auth/chat.messages.readonly", "https://www.googleapis.com/auth/chat.messages.create"]);
     const requested = authorizationUrl(CLIENT, "http://127.0.0.1:54321", createPkce()).searchParams.get("scope")?.split(" ");
-    expect(requested).toEqual([...REQUIRED_SCOPES, "https://www.googleapis.com/auth/chat.messages.reactions.create"]);
-    expect(REACTION_SCOPE).toBe(SCOPES.at(-1)!);
+    expect(requested).toEqual([...REQUIRED_SCOPES, "https://www.googleapis.com/auth/chat.messages.reactions.create",
+      "https://www.googleapis.com/auth/directory.readonly", "https://www.googleapis.com/auth/chat.spaces.create"]);
+    expect(SCOPES).toContain(REACTION_SCOPE);
     const api = mockFetch((_url, _init, index) => index === 0
       ? json({ access_token: "fixture-access", refresh_token: "fixture-refresh", scope: REQUIRED_SCOPES.join(" ") })
       : json({ email: "tester@example.test", email_verified: true, sub: "fixture-self" }));

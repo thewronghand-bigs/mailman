@@ -1,4 +1,4 @@
-# mailman v2.3 런타임
+# mailman v2.4 런타임
 
 Google Chat API를 사용자 OAuth로 호출하는 bun 런타임. 외부 의존성 없이 `bun:sqlite`와 node 표준 모듈을 사용한다. 배포본은 `cli.ts`를 `bun build --compile`한 단일 실행 파일이다. 설치는 [루트 가이드](../../INSTALL.md)를 참고한다.
 
@@ -10,6 +10,8 @@ Google Chat API를 사용자 OAuth로 호출하는 bun 런타임. 외부 의존�
 mailman auth [--client <client_secret.json>]
 mailman doctor
 mailman spaces [검색어] [--refresh] [--save <별칭>] [--default]
+mailman people [검색어]
+mailman people --forget <users/숫자ID>
 mailman collect [대상] [--dm <사람>] [--save <별칭>] [--default] [--deep]
 mailman fetch [대상] [--dm <사람>] [--save <별칭>] [--default] [--since <기간|날짜>] [--only bot|human] [--no-collect] [--deep] [--with-attachments]
 printf '%s\n' '본문' | mailman send [대상] [--dm <사람>] [--save <별칭>] [--default] [--attach <파일> ...] [--thread spaces/.../threads/...] [--agent claude|codex] [--no-tag] [--dry-run | --wait]
@@ -29,7 +31,15 @@ MAILMAN_BACKFILL_DAYS=60 mailman collect team --deep
 
 `resolve.ts`를 collect/fetch/send/wait와 `spaces --save`가 공유한다. config 별칭, 리터럴 `spaces/ID`, `--dm <사람>`, 스페이스 표시 이름 순서다(`spaces`에는 `--dm` 없음). 위치 인자와 `--dm`은 배타적이다. 이름은 NFKC·소문자·공백 제거 후 정확 일치 우선, 없으면 부분 일치하며 유일해야 한다. 다중 후보는 이름·종류·ID를 안내하고 exit 1이다. 0개면 캐시를 한 번 새로 고치고 재시도하며, 그래도 없으면 `mailman spaces`를 안내한다. 빈 캐시도 가져온 상태를 기록해 매번 다시 요청하지 않는다.
 
-`spaces`는 설정 파일 없이 동작한다. `spaces.list`를 100개씩 최대 1,000페이지 받아 완전히 성공한 뒤 목록 캐시를 원자 교체한다. 검색은 표시 이름 부분 일치다. `--refresh` 또는 캐시가 없을 때만 API를 호출한다. `--dm`은 `users/ID`·이메일(`users/<이메일>`)을 그대로 쓰고, 사람 이름은 DB 발신자의 표시 이름을 정규화 정확 일치해 유일한 `sender_name`을 찾는다. 동명이인은 후보를 보여 주고 이메일을 요청한다. `spaces:findDirectMessage`의 404는 아직 DM이 없다는 안내이며 생성하지 않는다.
+설정 파일이 없으면 `{ defaultSpace: "", spaces: {}, sendTag: true }`를 사용한다. 기존 파일도 defaultSpace의 빈 문자열·키 생략을 허용하며, 비어 있지 않은 별칭이 spaces에 없으면 오류다. 명시 대상은 config 없이 동작한다. 대상 생략 시에만 기본 방이 필요하고, 없으면 대상 지정이나 `mailman spaces '검색어' --save <별칭>`을 안내한다(exit 1). 잘못된 JSON·형식·읽기 권한은 계속 차단한다.
+
+`spaces.list`는 100개씩 최대 1,000페이지를 받아 완전히 성공한 뒤 목록 캐시를 원자 교체한다. 검색은 표시 이름 부분 일치다. `--refresh` 또는 캐시가 없을 때만 API를 호출한다. `--dm`은 `users/ID`·이메일(`users/<이메일>`)을 그대로 쓰고, 이름은 people 등록부의 정규화 정확 일치 → DB 발신자 → People API 디렉터리 순으로 해석한다. 디렉터리는 정확 일치 우선, 없으면 부분 일치다. 여러 명이면 이름·이메일·ID 후보를 보여 주고 추측하지 않는다.
+
+`people` 테이블은 user_name(PK, users/숫자ID), display_name, email(nullable), source(sender|directory|manual), updated_at을 저장한다. 기존 DB에는 CREATE TABLE IF NOT EXISTS로 추가한다. 이름으로 확정된 한 명만 upsert하며 dry-run은 등록·갱신하지 않는다. `people [검색어]`는 이름·ID·이메일·출처를 출력하고 `people --forget <users/숫자ID>`는 한 명의 등록만 지운다. 검색·삭제는 네트워크 없이 동작한다.
+
+디렉터리는 선택 `directory.readonly` 스코프가 있을 때 `GET https://people.googleapis.com/v1/people:searchDirectoryPeople`로 이름·이메일을 검색한다. pageSize=10, readMask=names,emailAddresses, sources=DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE을 사용하며 다음 페이지의 동명이인도 확인한다. people/숫자ID를 users/숫자ID로 변환하고 후보 전체는 저장하지 않는다. SERVICE_DISABLED는 People API 사용 설정, 스코프 부족은 mailman auth를 안내한다.
+
+`spaces:findDirectMessage`의 404는 조회·수집·대기에서는 아직 대화가 없는 DM 안내다. send는 본문·옵션 검증 뒤 선택 `chat.spaces.create`를 확인하고 `POST /v1/spaces:setup`으로 DM을 만들어 캐시한 뒤 전송한다. dry-run은 `새 DM을 만들어 보냄`을 표시하고 생성·등록하지 않는다. 생성 POST도 재시도하지 않는다. 생성 권한이 없는 토큰은 실제 생성에서만 exit 2이며 미리보기는 가능하다.
 
 위치 인자·`--dm`·`--from`·`--save`가 정규화 후 비면 설정/API 접근 전에 exit 1이다. 위치 인자 생략만 defaultSpace를 사용한다. 빈 표시 이름은 이름 매칭 후보에서 제외한다. 이름 해석 전 목록 캐시가 24시간을 초과했으면 한 번 갱신한다. 실패하면 기존 캐시를 유지하고 경고한다. 그 호출에서는 다시 갱신하지 않는다.
 
@@ -44,7 +54,7 @@ DM 대상은 수집된 sender 표시명을 알면 `DM: 이름 → users/ID`, 모
 
 ## 설정 점검
 
-`doctor.ts`는 경로·0600 권한, 설정 JSON과 defaultSpace, 데스크톱 클라이언트, 토큰·필수/리액션 스코프, OAuth 갱신, `GET /v1/spaces?pageSize=1`을 순서대로 점검한다. 파일·DB·권한·캐시·로그를 변경하지 않고 브라우저를 열지 않는다. 기본 방 메시지 조회는 하지 않는다. 파일 검증과 OAuth 갱신은 `auth.ts`, API 호출은 `chat.ts`를 공유하며 실제 네트워크 없이 fetch를 주입해 검증한다.
+`doctor.ts`는 경로·0600 권한, 설정 JSON과 defaultSpace, 데스크톱 클라이언트, 토큰·필수/리액션/디렉터리/DM 생성 스코프, OAuth 갱신, `GET /v1/spaces?pageSize=1`을 순서대로 점검한다. 디렉터리 스코프가 있으면 이메일 앞부분으로 People API에 pageSize=1 요청을 한 번 한다. 선택 API 실패는 경고만 내며 전체 실패로 만들지 않는다. 파일·DB·권한·캐시·로그를 변경하지 않고 브라우저를 열지 않는다. 기본 방 메시지 조회는 하지 않는다. 파일 검증과 OAuth 갱신은 `auth.ts`, API 호출은 `chat.ts`를 공유하며 실제 네트워크 없이 fetch를 주입해 검증한다.
 
 실패가 있으면 exit 1, 경고만 있으면 0이다. 설정 파일·DB 없음과 예시 자리표시 기본 방·0600이 아닌 권한·리액션 스코프 없음은 경고다. 클라이언트 없음은 받은 JSON의 8단계 등록 또는 처음 만드는 6단계, web 유형은 6단계를 안내한다. 갱신의 invalid_client/deleted_client/unauthorized_client는 새 JSON을 받거나 만들어 auth --client로 등록하도록 6단계를 안내한다. invalid_grant는 기존 5단계 게시·재인증 안내를 유지한다. 설정 오류가 있어도 독립적인 인증 점검은 계속하고, 클라이언트·토큰 실패 뒤에는 갱신/API를 건너뛴다. 응답 원문을 출력하지 않고 원인과 [설정 가이드](https://thewronghand-bigs.github.io/mailman/setup)의 단계 링크만 표시한다. 게시 상태·브라우저 계정·관리자 콘솔은 조회하지 않는다.
 
@@ -52,7 +62,7 @@ DM 대상은 수집된 sender 표시명을 알면 `DM: 이름 → users/ID`, 모
 
 ```bash
 bash ../build.sh                         # 버전은 package.json
-MAILMAN_VERSION=2.3.0 bash ../build.sh   # 버전 덮어쓰기
+MAILMAN_VERSION=2.4.0 bash ../build.sh   # 버전 덮어쓰기
 ```
 
 `--target=bun-darwin-arm64`/`bun-darwin-x64`로 `dist/mailman-darwin-arm64`, `dist/mailman-darwin-x64`를 만들고 `--define MAILMAN_BUILD_VERSION`으로 버전을 주입한 뒤 ad-hoc 서명한다. 현재 아키텍처 바이너리로 최소 환경(`env -i`)에서 `--version`·`--help`를 스모크한다. `dist/`는 gitignore 대상이다. 컴파일된 실행 파일은 스크립트 위치(`import.meta.url`)에 의존하지 않는다.
@@ -81,7 +91,7 @@ MAILMAN_VERSION=2.3.0 bash ../build.sh   # 버전 덮어쓰기
 
 `auth.ts`는 macOS `open`, `127.0.0.1` 임의 포트 loopback, PKCE S256, state 검증을 쓴다. 인증 대기는 최대 5분이며 `access_type=offline`, `prompt=consent`를 보낸다.
 
-요청/허용 스코프는 `openid`, `userinfo.email`, `chat.spaces.readonly`, `chat.messages.readonly`, `chat.messages.create`, `chat.messages.reactions.create`의 여섯 개다. `openid` 외에는 `https://www.googleapis.com/auth/` 접두사를 쓴다. 필수 검사는 기존 4개+openid만 요구하며 리액션은 선택이다. 기존 토큰에 리액션 권한이 없으면 `react`만 exit 2와 `mailman auth` 재실행을 안내한다. 나머지 명령에는 영향이 없다. 검증된 계정 이메일은 Bearer 헤더로 호출한 Google userinfo에서 확인한다.
+요청/허용 스코프는 `openid`, `userinfo.email`, `chat.spaces.readonly`, `chat.messages.readonly`, `chat.messages.create`, `chat.messages.reactions.create`, `directory.readonly`, `chat.spaces.create`의 여덟 개다. `openid` 외에는 `https://www.googleapis.com/auth/` 접두사를 쓴다. 필수 검사는 기존 4개+openid만 요구하며 리액션·디렉터리 검색·DM 생성은 선택이다. 해당 선택 권한이 없으면 필요한 기능만 exit 2와 `mailman auth` 재실행을 안내한다. 검증된 계정 이메일은 Bearer 헤더로 호출한 Google userinfo에서 확인한다.
 
 토큰 파일은 `refresh_token`, `email`, `scopes`, `user_name`(`users/<Google 계정 sub>`)을 저장한다. auth는 토큰 응답의 id_token에서 sub를 읽고 userinfo의 sub와도 대조한다. id_token이 없으면 userinfo의 sub를 쓴다. 이전 토큰의 user_name은 첫 대기 때 userinfo를 한 번 호출해 보완한다. 0600 임시 파일을 만든 뒤 원자적으로 교체한다. access token은 수집/전송 때마다 refresh로 발급하고 메모리에서만 쓰며 id_token 원문도 저장하지 않는다. 원본 OAuth 에러, 토큰, client secret, webhook URL은 출력하지 않는다.
 
@@ -184,7 +194,7 @@ stdout 쓰기가 완료된 뒤 실제 표시한 새 메시지의 최대 생성 �
 |------|------|
 | 0 | 성공/help/버전, doctor 경고만 있음; `mailman fetch`는 수집 실패 후 기존 DB 출력도 성공으로 처리 |
 | 1 | 인자·설정·파일 권한/첨부 검증 오류, 잘못된 `--client` 파일, 본문·첨부 모두 없음, doctor 실패 항목 있음 |
-| 2 | 토큰 파일 또는 OAuth 클라이언트 파일 없음, react의 선택 스코프 없음 (`mailman auth` 필요) |
+| 2 | 토큰 파일 또는 OAuth 클라이언트 파일 없음, 필요한 선택 스코프 없음 (`mailman auth` 필요) |
 | 3 | 재인증 필요, OAuth/HTTP/네트워크/페이지 수집 실패 |
 | 4 | wait 또는 send --wait에서 timeout까지 답장 없음 (과거 안 읽은 메시지는 표시할 수 있음). send --wait는 이미 전송 완료됨, 재전송 금지 |
 | 5 | send --wait 전송 완료 후 대기 오류·출력 실패·시그널 — 재전송 금지. POST 자체 실패는 해당 오류 코드 |

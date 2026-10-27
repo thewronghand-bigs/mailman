@@ -56,6 +56,7 @@ describe("doctor 파일·권한·옵션", () => {
     for (const path of [paths.configFile, paths.clientFile, paths.tokenFile, paths.dbPath]) expect(result.text).toContain(path);
     expect(result.calls.map(call => [call.url.toString(), call.init.method])).toEqual([
       [CLIENT.token_uri, "POST"], ["https://chat.googleapis.com/v1/spaces?pageSize=1", "GET"],
+      ["https://people.googleapis.com/v1/people:searchDirectoryPeople?query=tester&readMask=names%2CemailAddresses&sources=DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE&pageSize=1", "GET"],
     ]);
     expect(new Headers(result.calls[1]!.init.headers).get("Authorization")).toBe(`Bearer ${ACCESS}`);
     expect(readFileSync(paths.dbPath, "utf8")).toBe("fixture-db-must-stay-unopened");
@@ -86,11 +87,25 @@ describe("doctor 파일·권한·옵션", () => {
     const result = await diagnose(paths);
     expect(result.exit).toBe(0);
     expect(result.text).toContain("⚠️ 설정 파일: 아직 기본 방이 없습니다 (설정 파일 없음)");
+    expect(result.text).toContain("명시 대상(--dm·방 이름)은 설정 없이 동작");
     expect(result.text).toContain("mailman spaces <검색어> --save <별칭>");
     expect(result.text).toContain(guide(10));
-    expect(result.calls).toHaveLength(2);
+    expect(result.calls).toHaveLength(3);
     expect(existsSync(paths.configFile)).toBe(false);
     expect(existsSync(paths.dbPath)).toBe(false);
+  });
+
+  test("빈·생략된 기본 방은 경고만 내며 기존 파일을 바꾸지 않는다", async () => {
+    for (const config of [{ defaultSpace: "", spaces: {} }, { spaces: {} }]) {
+      const paths = doctorFixture();
+      const raw = JSON.stringify(config);
+      writeFileSync(paths.configFile, raw);
+      const result = await diagnose(paths);
+      expect(result.exit).toBe(0);
+      expect(result.text).toContain("명시 대상(--dm·방 이름)은 설정 없이 동작");
+      expect(result.text).not.toContain("❌");
+      expect(readFileSync(paths.configFile, "utf8")).toBe(raw);
+    }
   });
 
   test("이전 설치의 자리표시 기본 방은 경고하고 --save·--default를 안내하며 파일을 바꾸지 않는다", async () => {
@@ -106,7 +121,7 @@ describe("doctor 파일·권한·옵션", () => {
       expect(result.text).toContain(guide(10));
       expect(result.text).not.toContain("✅ 설정 파일");
       expect(result.text).not.toContain("❌");
-      expect(result.calls).toHaveLength(2);
+      expect(result.calls).toHaveLength(3);
       expect(readFileSync(paths.configFile, "utf8")).toBe(raw);
       expect(statSync(paths.configFile).mode & 0o777).toBe(0o600);
     }
@@ -121,8 +136,8 @@ describe("doctor 파일·권한·옵션", () => {
     expect(result.text).not.toContain("아직 기본 방");
   });
 
-  test("깨진 JSON·누락된 defaultSpace·잘못된 설정 형식은 exit 1이며 인증 점검은 계속한다", async () => {
-    for (const config of ['{"fixture-doctor-private-broken-json":', '{"defaultSpace":"missing","spaces":{}}', '{"spaces":{}}', '{"defaultSpace":"tn","spaces":{"tn":{"space":"bad"}}}']) {
+  test("깨진 JSON·등록되지 않은 defaultSpace·잘못된 설정 형식은 exit 1이며 인증 점검은 계속한다", async () => {
+    for (const config of ['{"fixture-doctor-private-broken-json":', '{"defaultSpace":"missing","spaces":{}}', '{"defaultSpace":null,"spaces":{}}', '{"defaultSpace":"tn","spaces":{"tn":{"space":"bad"}}}']) {
       const paths = doctorFixture();
       writeFileSync(paths.configFile, config);
       const result = await diagnose(paths);
@@ -130,7 +145,7 @@ describe("doctor 파일·권한·옵션", () => {
       expect(result.text).toContain("❌ 설정 파일: JSON·형식 오류 또는 defaultSpace가 spaces에 없음");
       expect(result.text).not.toContain("fixture-doctor-private-broken-json");
       expect(result.text).toContain(guide(10));
-      expect(result.calls).toHaveLength(2);
+      expect(result.calls).toHaveLength(3);
     }
   });
 
@@ -180,7 +195,7 @@ describe("doctor 인증과 건너뜀", () => {
     expect(line).toContain(guide(8));
     expect(result.text).not.toContain("web(");
     expect(result.text).toContain("✅ 토큰: 파일 유효");
-    expect(result.text.match(/건너뜀/g)).toHaveLength(2);
+    expect(result.text.match(/건너뜀/g)).toHaveLength(3);
     expect(result.calls).toHaveLength(0);
   });
 
@@ -218,8 +233,34 @@ describe("doctor 인증과 건너뜀", () => {
     const result = await diagnose(paths);
     expect(result.exit).toBe(0);
     expect(result.text).toContain("⚠️ 리액션 스코프 없음 — react만 불가");
+    expect(result.text).toContain("⚠️ 디렉터리 검색 스코프 없음");
+    expect(result.text).toContain("⚠️ DM 생성 스코프 없음");
     expect(result.text).toContain(guide(8));
     expect(result.calls).toHaveLength(2);
+  });
+
+  test("선택 People API 실패는 안전한 경고·exit 0이며 한 번만 호출하고 저장하지 않는다", async () => {
+    for (const [status, reason, phrase] of [[403, "SERVICE_DISABLED", "People API 사용 설정"], [403, "ACCESS_TOKEN_SCOPE_INSUFFICIENT", "mailman auth"],
+      [403, "ADMIN_POLICY_ENFORCED", "디렉터리 공유 정책"], [401, "UNAUTHENTICATED", "인증이 거부"], [503, "UNAVAILABLE", "People API 점검에 실패"]] as const) {
+      const paths = doctorFixture();
+      const before = readFileSync(paths.tokenFile, "utf8");
+      const api = mockFetch(url => url.hostname === "oauth2.googleapis.com" ? json({ access_token: ACCESS })
+        : url.hostname === "chat.googleapis.com" ? json({})
+        : json({ error: { message: `fixture-unregistered-directory-secret ${PRIVATE_VALUES.join(" ")}`, details: [{ reason }] } }, status));
+      const result = await diagnose(paths, api);
+      expect(result.exit).toBe(0);
+      expect(result.text).toContain("⚠️ People API (선택)");
+      expect(result.text).toContain(phrase);
+      expect(result.text).not.toContain("fixture-unregistered-directory-secret");
+      expect(result.text).not.toContain("❌");
+      expect(result.calls).toHaveLength(3);
+      const search = result.calls[2]!.url;
+      expect(search.hostname).toBe("people.googleapis.com");
+      expect(search.searchParams.get("pageSize")).toBe("1");
+      expect(search.searchParams.get("query")).toBe("tester");
+      expect(readFileSync(paths.tokenFile, "utf8")).toBe(before);
+      expect(readFileSync(paths.dbPath, "utf8")).toBe("fixture-db-must-stay-unopened");
+    }
   });
 
   test("invalid_grant는 7일 만료를 단정하지 않고 게시·재인증을 안내하며 Chat API를 건너뛴다", async () => {
@@ -305,7 +346,7 @@ describe("doctor Chat API 오류 분류와 비밀값 보호", () => {
       expect(result.text).toContain(entry.phrase);
       expect(result.text).toContain(guide(entry.step));
       expect(result.text).not.toContain("fixture-doctor-unregistered-secret");
-      expect(result.calls).toHaveLength(2);
+      expect(result.calls).toHaveLength(3);
     });
   }
 
@@ -319,7 +360,7 @@ describe("doctor Chat API 오류 분류와 비밀값 보호", () => {
       expect(result.exit).toBe(1);
       expect(result.text).toContain("네트워크 연결 실패");
       expect(result.text).toContain(guide(9));
-      expect(result.calls).toHaveLength(failAt + 1);
+      expect(result.calls).toHaveLength(failAt === 0 ? 1 : 3);
       if (failAt === 0) expect(result.text).toContain("Chat API: 건너뜀");
     }
   });
@@ -330,7 +371,7 @@ describe("doctor Chat API 오류 분류와 비밀값 보호", () => {
       const result = await diagnose(doctorFixture(), api);
       expect(result.exit).toBe(1);
       expect(result.text).toContain(response.status === 401 ? guide(8) : guide(9));
-      expect(result.calls).toHaveLength(2);
+      expect(result.calls).toHaveLength(3);
     }
   });
 

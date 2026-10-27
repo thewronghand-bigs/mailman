@@ -133,7 +133,7 @@ describe("공통 대상 해석", () => {
       expect(() => resolvePerson(db, "가온")).toThrow("users/another");
       expect(() => resolvePerson(db, "가온")).toThrow("users/peer");
       const notFound = mockFetch(() => json({ error: { message: "Not found" } }, 404));
-      await expect(resolveTarget(config, db, async () => new ChatClient("fixture-access-secret", notFound.fetcher), { dm: "peer@example.test" })).rejects.toThrow("아직 DM이 없습니다");
+      await expect(resolveTarget(config, db, async () => new ChatClient("fixture-access-secret", notFound.fetcher), { dm: "peer@example.test" })).rejects.toThrow("아직 대화가 없는 DM");
       expect(notFound.calls).toHaveLength(1);
     } finally { db.close(); }
   });

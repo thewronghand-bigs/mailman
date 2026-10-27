@@ -7,7 +7,9 @@ permalink: /
 
 **mailman**은 Google Chat 스페이스의 메시지를 내 Mac의 로컬 SQLite에 모아 두고, Claude Code의 `/mailman` 슬래시 커맨드, Codex의 `$mailman` 스킬, 또는 터미널에서 조회·전송하는 macOS용 CLI입니다.
 
-- **대상 찾기**: 스페이스 표시 이름이나 사람 이름·이메일로 기존 방을 찾고, 원하면 새 별칭으로 저장합니다.
+- **첫 DM**: 처음 보내는 사람도 이름만으로 회사 디렉터리에서 찾고 DM을 만들어 보냅니다. 확정한 한 명만 로컬에 등록해 다음 세션부터 바로 찾습니다.
+- **대상 찾기**: 스페이스 표시 이름이나 사람 이름·이메일로 찾습니다. 명시 대상은 config 없이 동작하고, 원하면 새 방 별칭으로 저장합니다.
+- **사람 등록부**: `mailman people [검색어]`로 이름·ID·이메일·출처를 보고 `--forget users/숫자ID`로 지웁니다.
 - **조회**: 선택한 스페이스의 새 메시지를 스레드 단위로 정리해 보여 줍니다. 사람/봇 메시지만 골라 볼 수도 있습니다(`--only human`, `--only bot`).
 - **전송**: 사용자가 승인한 텍스트·지정 파일을 본인 명의로 원 스레드에 답글로 보냅니다.
 - **답장 대기**: 짧게 나누어 온 답장을 조용해진 뒤 한 묶음으로 읽습니다.
@@ -35,7 +37,9 @@ curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/inst
 
 **A. 설정을 마친 동료에게 클라이언트 JSON을 받았다면 [8단계부터(약 5분)](setup.md#step-8), B. 처음부터 혼자 설정한다면 [1단계부터(약 20분)](setup.md#step-1)** 진행하세요. 회사 Google Workspace 계정이 필요하며, B 경로는 개인 Gmail도 준비합니다. 인증 후 `mailman doctor`로 확인합니다.
 
-가이드 마지막 단계에서 `mailman spaces '검색어' --save <별칭>`으로 방을 저장하고 Claude Code `/mailman <별칭>` 또는 Codex `$mailman`으로 조회합니다. 설치기는 설정 파일을 만들지 않으며 첫 `--save`가 0600 설정 파일을 만듭니다. 처음 저장한 별칭이 기본 방이고 바꾸려면 `--save <별칭> --default`를 사용합니다. 기존 별칭의 방 값은 덮어쓰지 않습니다. 오류가 나면 먼저 `mailman doctor`의 해결 링크를 확인하세요. Codex 샌드박스 설정은 [README](https://github.com/thewronghand-bigs/mailman#codex에서-쓰기)를 참고하세요.
+가이드 마지막 단계에서 `mailman spaces '검색어' --save <별칭>`으로 방을 저장하고 Claude Code `/mailman <별칭>` 또는 Codex `$mailman`으로 조회합니다. 설치기는 설정 파일을 만들지 않으며 첫 `--save`가 0600 설정 파일을 만듭니다. 처음 저장한 별칭이 기본 방이고 바꾸려면 `--save <별칭> --default`를 사용합니다. 기존 별칭의 방 값은 덮어쓰지 않습니다. 오류가 나면 먼저 출력된 안내를 따르고, 해결되지 않으면 `mailman doctor`의 해결 링크를 확인하세요. Codex 샌드박스 설정은 [README](https://github.com/thewronghand-bigs/mailman#codex에서-쓰기)를 참고하세요.
+
+방 이름·`spaces/ID`·`--dm`을 지정하면 설정 파일 없이 시작할 수 있습니다. 기본 방은 대상을 생략할 때만 필요합니다. v2.4의 첫 DM 이름 검색에는 선택 권한과 People API 사용 설정이 필요합니다([기존 사용자 업그레이드](setup.md#upgrade-v2-4)).
 
 ## 명령
 
@@ -45,6 +49,8 @@ curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/inst
 mailman auth [--client <client_secret.json>]
 mailman doctor
 mailman spaces [검색어] [--refresh] [--save <별칭>] [--default]
+mailman people [검색어]
+mailman people --forget <users/숫자ID>
 mailman collect [대상] [--dm <사람>] [--save <별칭>] [--default] [--deep]
 mailman fetch [대상] [--dm <사람>] [--save <별칭>] [--default] [--since 24h|3d|YYYY-MM-DD] [--only bot|human] [--no-collect] [--deep] [--with-attachments]
 mailman send [대상] [--dm <사람>] [--save <별칭>] [--default] [--attach <파일> ...] [--thread spaces/.../threads/...] [--agent claude|codex | --no-tag] [--dry-run | --wait] < 본문.txt
@@ -55,6 +61,8 @@ mailman --help | --version
 ```
 
 `send`는 로그인한 사용자 명의로 보내며 본문 앞에 `[🤖 AI] ` 태그를 붙입니다(`--agent claude`면 `[🤖 Claude] `, `--agent codex`면 `[🤖 Codex] `). 태그는 설정 `"sendTag": false`로 끄거나 `--no-tag`로 이번 전송만 뺄 수 있습니다.
+
+`mailman send --dm '사람 이름' --agent codex < 본문.txt`는 등록된 사람 → 수집 발신자 → 회사 디렉터리 순서로 상대를 찾습니다. 동명이인은 이메일·ID 후보를 표시해 선택하게 합니다. DM이 없으면 전송할 때만 만들며, `--dry-run`은 `새 DM을 만들어 보냄` 미리보기만 표시하고 사람·방을 저장하지 않습니다. `fetch`·`collect`·`wait`는 DM을 만들지 않습니다. 디렉터리 검색과 DM 생성 스코프가 없는 기존 토큰도 나머지 기능은 동작합니다.
 
 `send --attach ./handover.md`로 지정한 일반 파일을 최대 10개·각 200MB까지 전송합니다. 심볼릭 링크는 거절하며 미리보기·성공 출력의 경로는 실제 경로(realpath)입니다. 모든 파일 검증과 업로드가 성공한 뒤에만 메시지를 생성하며 업로드 실패 시 메시지는 보내지 않습니다. 본문이 없으면 태그만, 태그가 꺼져 있으면 첨부만 보냅니다. `--dry-run`은 업로드 없이 경로·이름·크기를 표시하고 성공 출력은 파일 이름과 실제 경로를 나열합니다. Claude/Codex는 이 목록을 전송 승인에 포함하고 사용자가 지정하지 않은 파일은 첨부하지 않습니다. .env·키·토큰·자격증명 파일은 첨부하지 않고 경고합니다. 작성 요청을 받은 핸드오버 md는 먼저 파일로 쓴 뒤 경로를 승인받아 첨부합니다. 기존 전송 권한만 사용합니다.
 

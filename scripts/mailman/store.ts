@@ -2,7 +2,16 @@ import { Database } from "bun:sqlite";
 import { closeSync, mkdirSync, openSync } from "node:fs";
 import { dirname } from "node:path";
 import type { ChatMessage, ChatSpace } from "./chat";
+import { MailmanError } from "./errors";
 import { normalizeTime } from "./time";
+
+export type Person = {
+  userName: string;
+  displayName: string;
+  email: string | null;
+  source: "sender" | "directory" | "manual";
+  updatedAt: string;
+};
 
 export type MessageRow = {
   name: string;
@@ -51,8 +60,32 @@ export function openDatabase(path: string): Database {
       space_type TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS people (
+      user_name TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      email TEXT,
+      source TEXT NOT NULL CHECK(source IN ('sender','directory','manual')),
+      updated_at TEXT NOT NULL
+    );
   `);
   return db;
+}
+
+export function registeredPeople(db: Database): Person[] {
+  return db.query<Person, []>("SELECT user_name AS userName, display_name AS displayName, email, source, updated_at AS updatedAt FROM people ORDER BY display_name, user_name").all();
+}
+
+export function upsertPerson(db: Database, person: Person): void {
+  if (!/^users\/\d+$/.test(person.userName)) throw new MailmanError("등록할 사람은 users/숫자ID 형식으로 지정하세요.");
+  db.query(`INSERT INTO people(user_name,display_name,email,source,updated_at) VALUES (?,?,?,?,?)
+    ON CONFLICT(user_name) DO UPDATE SET display_name=excluded.display_name, email=coalesce(excluded.email,people.email),
+      source=excluded.source, updated_at=excluded.updated_at`)
+    .run(person.userName, person.displayName, person.email, person.source, person.updatedAt);
+}
+
+export function forgetPerson(db: Database, userName: string): boolean {
+  if (!/^users\/\d+$/.test(userName)) throw new MailmanError("--forget은 users/숫자ID 형식으로 지정하세요.");
+  return db.query("DELETE FROM people WHERE user_name=?").run(userName).changes > 0;
 }
 
 export function cachedSpaces(db: Database): ChatSpace[] {

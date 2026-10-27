@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { main, parseArguments } from "../cli";
-import { getRuntimePaths, loadConfig, resolveSendPrefix, resolveSpace, SETUP_GUIDE_URL, type Environment, type RuntimePaths } from "../runtime";
+import { getRuntimePaths, loadConfig, resolveSendPrefix, resolveSpace, type Environment, type RuntimePaths } from "../runtime";
 import { getMeta, openDatabase, setMeta, toRow, upsertRows } from "../store";
 import { cleanupFixtures, fixture, json, message, mockFetch, SPACE, THREAD } from "./helpers";
 
@@ -26,8 +26,7 @@ describe("CLI와 경로", () => {
     expect(getRuntimePaths({ MAILMAN_HOME: "/custom/data", MAILMAN_CONFIG: "/etc/mailman.json" }).configFile).toBe("/etc/mailman.json");
     expect(getRuntimePaths({ MAILMAN_CONFIG: "~/conf/mailman.json" }).configFile).toBe(join(homedir(), "conf/mailman.json"));
     const missing = join(fixture(false).home, "없는 설정.json");
-    expect(() => loadConfig(missing)).toThrow(missing);
-    expect(() => loadConfig(missing)).toThrow(SETUP_GUIDE_URL);
+    expect(loadConfig(missing)).toEqual({ defaultSpace: "", spaces: {}, sendTag: true });
   });
 
   test("별칭 생략은 기본 스페이스, 잘못된 별칭은 에러다", () => {

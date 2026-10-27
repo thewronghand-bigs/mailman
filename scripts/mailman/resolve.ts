@@ -2,10 +2,10 @@
 import type { Database } from "bun:sqlite";
 import { existsSync, readFileSync } from "node:fs";
 import type { ChatClient, ChatSpace } from "./chat";
-import { errorMessage, isRecord, MailmanError } from "./errors";
+import { errorMessage, isRecord, MailmanError, RequestError } from "./errors";
 import { writePrivateFile } from "./private-file";
-import { loadConfig, validateSpace, type MailmanConfig } from "./runtime";
-import { cachedSpaces, cacheSpace, cacheSpaces, getMeta } from "./store";
+import { loadConfig, MISSING_TARGET, validateSpace, type MailmanConfig } from "./runtime";
+import { cachedSpaces, cacheSpace, cacheSpaces, getMeta, registeredPeople, upsertPerson, type Person } from "./store";
 
 export function normalizeName(value: string): string {
   return value.normalize("NFKC").toLowerCase().replace(/\s+/gu, "");
@@ -21,9 +21,9 @@ export function formatSpace(space: ChatSpace): string {
   return `${space.displayName || "(표시 이름 없음)"} (${space.spaceType}, ${space.name})`;
 }
 
-export type ResolvedTarget = ChatSpace & { spaceKey: string; dmUser?: string; dmLabel?: string };
-export function targetHeader(target: ChatSpace): string {
-  return `[대상] ${formatSpace(target)}`;
+export type ResolvedTarget = ChatSpace & { spaceKey: string; dmUser?: string; dmLabel?: string; newDm?: boolean };
+export function targetHeader(target: ChatSpace & { newDm?: boolean }): string {
+  return target.newDm ? `[대상] ${target.displayName} (DIRECT_MESSAGE, 새 DM을 만들어 보냄)` : `[대상] ${formatSpace(target)}`;
 }
 
 // 대기 중 새로 수집한 sender 표시명도 마지막 출력에 반영한다.
@@ -38,7 +38,7 @@ export function describeTarget(db: Database | undefined, target: ResolvedTarget,
   }
   const known = user && db ? db.query<{ displayName: string }, [string]>(
     "SELECT sender_display_name AS displayName FROM messages WHERE sender_name=? AND trim(coalesce(sender_display_name,''))<>'' AND (sender_type IS NULL OR sender_type='HUMAN') ORDER BY create_time DESC, fetched_at DESC LIMIT 1",
-  ).get(user)?.displayName : undefined;
+  ).get(user)?.displayName ?? registeredPeople(db).find(person => person.userName === user)?.displayName : undefined;
   const fallback = target.dmLabel ?? target.displayName.replace(/^DM: /, "");
   const label = known || fallback || user || target.spaceKey;
   return { ...target, dmUser: user, dmLabel: label, displayName: `DM: ${label}${user && label !== user ? ` → ${user}` : ""}` };
@@ -49,7 +49,7 @@ export function inboxLabel(target: ResolvedTarget): string {
     : target.displayName || target.spaceKey || target.name;
 }
 
-type ClientProvider = () => Promise<Pick<ChatClient, "listSpaces" | "findDirectMessage">>;
+type ClientProvider = () => Promise<Pick<ChatClient, "listSpaces" | "findDirectMessage"> & Partial<Pick<ChatClient, "searchDirectoryPeople">>>;
 
 export async function listSpaces(db: Database, client: ClientProvider, refresh = false, now = new Date()): Promise<ChatSpace[]> {
   if (refresh || !getMeta(db, "spacesUpdatedAt")) {
@@ -64,18 +64,57 @@ export function searchSpaces(spaces: ChatSpace[], search = ""): ChatSpace[] {
   return spaces.filter(space => normalizeName(space.displayName).includes(normalized));
 }
 
-export function resolvePerson(db: Database, value: string): string {
-  requireName(value, "사람");
+function literalPerson(value: string): string | undefined {
   if (/^users\/[A-Za-z0-9_.@+-]+$/.test(value)) return value;
   if (/^[^@\s/]+@[^@\s/]+$/.test(value)) return `users/${value}`;
+}
+
+function uniquePerson(people: Person[]): Person | undefined {
+  const users = [...new Map(people.map(person => [person.userName, person])).values()];
+  if (users.length > 1) throw new MailmanError(`같은 이름의 사람이 여러 명입니다. 이메일 또는 users/ID로 지정하세요.\n${users.map(formatPerson).join("\n")}`);
+  return users[0];
+}
+
+export function formatPerson(person: Pick<Person, "displayName" | "email" | "userName">): string {
+  return `- ${person.displayName} (${person.userName}${person.email ? `, ${person.email}` : ""})`;
+}
+
+function knownPerson(db: Database, value: string): Person | undefined {
+  const registered = registeredPeople(db).filter(person => normalizeName(person.displayName) === normalizeName(value));
+  if (registered.length) return uniquePerson(registered);
   const candidates = db.query<{ name: string; displayName: string }, []>(
     `SELECT DISTINCT sender_name AS name, sender_display_name AS displayName FROM messages
      WHERE sender_name LIKE 'users/%' AND sender_display_name IS NOT NULL AND (sender_type IS NULL OR sender_type='HUMAN')`,
   ).all().filter(sender => normalizeName(sender.displayName) === normalizeName(value));
-  const users = [...new Map(candidates.map(sender => [sender.name, sender])).values()];
-  if (users.length === 1) return users[0]!.name;
-  if (users.length > 1) throw new MailmanError(`같은 이름의 사람이 여러 명입니다. 이메일로 지정하세요.\n${users.map(user => `- ${user.displayName} (${user.name})`).join("\n")}`);
+  return uniquePerson(candidates.map(sender => ({ userName: sender.name, displayName: sender.displayName, email: null, source: "sender", updatedAt: "" })));
+}
+
+export function resolvePerson(db: Database, value: string): string {
+  requireName(value, "사람");
+  const user = literalPerson(value) ?? knownPerson(db, value)?.userName;
+  if (user) return user;
   throw new MailmanError("수집된 발신자 기록에서 사람을 찾을 수 없습니다. 이메일로 지정하세요.");
+}
+
+async function resolveDmPerson(db: Database, client: ClientProvider, value: string,
+  options: { dryRun?: boolean; directoryEnabled?: () => boolean }, now: Date): Promise<{ userName: string; displayName: string }> {
+  const literal = literalPerson(value);
+  if (literal) return { userName: literal, displayName: value };
+  let person = knownPerson(db, value);
+  if (!person) {
+    if (!options.directoryEnabled?.()) throw new MailmanError("등록된 사람·수집된 발신자 기록에서 찾을 수 없습니다. 이메일로 지정하거나, 디렉터리 검색 권한을 추가하고 mailman auth를 다시 실행하세요.", 2);
+    const api = await client();
+    if (!api.searchDirectoryPeople) throw new MailmanError("디렉터리 검색을 사용할 수 없습니다. 이메일로 지정하세요.");
+    const found = await api.searchDirectoryPeople(value);
+    const normalized = normalizeName(value);
+    const exact = found.filter(candidate => normalizeName(candidate.displayName) === normalized);
+    const candidates = exact.length ? exact : found.filter(candidate => normalizeName(candidate.displayName).includes(normalized));
+    person = uniquePerson(candidates.map(candidate => ({ ...candidate, source: "directory", updatedAt: now.toISOString() })));
+    if (!person) throw new MailmanError("디렉터리에서 찾지 못함 (관리자가 디렉터리 공유를 막았을 수 있음). 이메일로 지정하세요.");
+  }
+  // 이메일 별칭 등 예전 sender 값은 그대로 해석하되 정식 숫자 ID만 등록한다.
+  if (!options.dryRun && /^users\/\d+$/.test(person.userName)) upsertPerson(db, { ...person, updatedAt: now.toISOString() });
+  return person;
 }
 
 // 이메일 별칭 자체에는 정식 ID가 없다. 기존 DM의 발신자로 전송 전에 확정한다.
@@ -110,9 +149,11 @@ export async function resolveWaitPerson(db: Database, client: Pick<ChatClient, "
 }
 
 export async function resolveTarget(config: MailmanConfig, db: Database | undefined, client: ClientProvider,
-  options: { spaceKey?: string; dm?: string }, now = new Date(), warn: (text: string) => void = console.error): Promise<ResolvedTarget> {
+  options: { spaceKey?: string; dm?: string; dryRun?: boolean; allowNewDm?: boolean; directoryEnabled?: () => boolean },
+  now = new Date(), warn: (text: string) => void = console.error): Promise<ResolvedTarget> {
   if (options.dm !== undefined && options.spaceKey !== undefined) throw new MailmanError("위치 인자와 --dm은 함께 쓸 수 없습니다.");
   const key = options.spaceKey ?? config.defaultSpace;
+  if (options.spaceKey === undefined && options.dm === undefined && !key) throw new MailmanError(MISSING_TARGET);
   requireName(options.dm ?? key, options.dm === undefined ? "대상" : "--dm");
   const metadata = (name: string): ChatSpace => cachedSpacesIfPresent(db).find(space => space.name === name)
     ?? { name, displayName: key, spaceType: "SPACE_TYPE_UNSPECIFIED" };
@@ -123,10 +164,16 @@ export async function resolveTarget(config: MailmanConfig, db: Database | undefi
   }
   if (!db) throw new MailmanError("대상 이름 해석에 필요한 DB를 열 수 없습니다.");
   if (options.dm !== undefined) {
-    const user = resolvePerson(db, options.dm);
-    const space = await (await client()).findDirectMessage(user);
-    cacheSpace(db, space, now.toISOString());
-    return describeTarget(db, { ...space, displayName: space.displayName || options.dm, spaceKey: options.dm, dmUser: user });
+    const person = await resolveDmPerson(db, client, options.dm, options, now);
+    let space: ChatSpace;
+    try { space = await (await client()).findDirectMessage(person.userName); }
+    catch (error: unknown) {
+      if (!(error instanceof RequestError) || error.status !== 404 || !options.allowNewDm) throw error;
+      return describeTarget(db, { name: "", displayName: person.displayName, spaceType: "DIRECT_MESSAGE", spaceKey: options.dm,
+        dmUser: person.userName, dmLabel: person.displayName, newDm: true });
+    }
+    if (!options.dryRun) cacheSpace(db, space, now.toISOString());
+    return describeTarget(db, { ...space, displayName: space.displayName || person.displayName, spaceKey: options.dm, dmUser: person.userName, dmLabel: person.displayName });
   }
   const updated = getMeta(db, "spacesUpdatedAt");
   const expired = updated !== undefined && (!Number.isFinite(Date.parse(updated)) || now.getTime() - Date.parse(updated) > SPACE_CACHE_MAX_AGE_MS);
@@ -158,7 +205,7 @@ export function saveAlias(configFile: string, alias: string, space: string, opti
   // 최신 파일을 다시 읽어 다른 필드와 이미 저장된 별칭을 보존한다.
   const exists = existsSync(configFile);
   const config = exists ? loadConfig(configFile) : undefined;
-  // 설정이 없을 때만 첫 별칭을 기본 방으로 만든다. 기존 파일의 기본 방과 다른 필드는 보존한다.
+  // 기본 방이 없으면 첫 별칭으로 정한다. 기존 기본 방과 다른 필드는 보존한다.
   const raw: unknown = exists ? JSON.parse(readFileSync(configFile, "utf8")) : { defaultSpace: alias, spaces: {} };
   if (!isRecord(raw) || !isRecord(raw.spaces)) throw new MailmanError("설정 파일의 spaces를 확인하세요.");
   const registered = Object.hasOwn(raw.spaces, alias);
@@ -167,6 +214,6 @@ export function saveAlias(configFile: string, alias: string, space: string, opti
   }
   if (options.dryRun) return;
   if (!registered) Object.defineProperty(raw.spaces, alias, { value: { space }, enumerable: true, configurable: true, writable: true });
-  if (options.makeDefault) raw.defaultSpace = alias;
+  if (options.makeDefault || !config?.defaultSpace) raw.defaultSpace = alias;
   writePrivateFile(configFile, JSON.stringify(raw, null, 2) + "\n", ".mailman-config-", "설정 파일에 별칭을 저장할 수 없습니다.");
 }

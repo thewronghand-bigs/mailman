@@ -2,11 +2,13 @@
   <img width="261" height="261" alt="mailman" src="https://github.com/user-attachments/assets/b913ae4d-6ab5-4f7a-b655-7acd3865e33d" />
 </p>
 
-<h1 align="center">Mailman v2.3</h1>
+<h1 align="center">Mailman v2.4</h1>
 
 <p align="center"><i>소통을 딸깍하세요.</i></p>
 
 Google Chat 스페이스의 메시지를 로컬 SQLite에 모아 Claude Code(`/mailman`)나 Codex(`$mailman`)에서 조회하고, 승인한 답장을 원 스레드에 보냅니다. **사용자 OAuth + Google Chat API**를 사용합니다.
+
+**처음 보내는 사람도 이름만으로 DM을 보낼 수 있습니다.** 등록된 사람·수집 발신자·회사 디렉터리를 순서대로 찾고, 기존 DM이 없으면 만들어 보냅니다. 한 번 확정한 사람은 로컬 등록부에 남아 다음 세션부터 바로 해석됩니다. 방 이름·`spaces/ID`·`--dm`을 명시하면 config 파일 없이 동작합니다.
 
 ## 사용
 
@@ -34,6 +36,9 @@ mailman spaces                                             # 내가 속한 스�
 mailman spaces '개발 팀' --refresh                          # 이름 검색, 목록 갱신
 mailman spaces '개발 팀' --save dev                         # 별칭 저장 (첫 별칭이 기본 방)
 mailman spaces --save dev --default                        # 기존 별칭을 기본 방으로 변경
+mailman people                                             # 등록된 사람의 이름·ID·이메일·출처
+mailman people '검색어'                                     # 등록부 검색 (네트워크 없음)
+mailman people --forget users/100001                        # 한 사람의 등록 삭제
 mailman fetch dev                                          # 저장한 별칭으로 조회
 mailman fetch --dm colleague@example.test                   # 기존 1:1 DM 조회
 mailman collect team                                        # 수집만
@@ -47,6 +52,7 @@ mailman download spaces/SPACE_ID/messages/MESSAGE_ID --print # 첨부 저장, �
 mailman react spaces/SPACE_ID/messages/MESSAGE_ID '👀'        # 작업 관련 메시지 읽음
 mailman react spaces/SPACE_ID/messages/MESSAGE_ID '✅'        # 실제 반영 완료, 사용자 승인 후
 printf '%s\n' '확인했습니다.' | mailman send team
+printf '%s\n' '안녕하세요.' | mailman send --dm '사람 이름' --agent codex  # 첫 DM도 이름만으로
 printf '%s\n' '명세 반영 완료했습니다.' | mailman send team --thread spaces/SPACE_ID/threads/THREAD_ID
 printf '%s\n' '확인했습니다.' | mailman send team --agent codex   # [🤖 Codex] 태그
 printf '%s\n' '확인했습니다.' | mailman send team --no-tag        # 이번만 태그 없이
@@ -61,11 +67,15 @@ mailman --version
 
 한 번에 새 메시지를 최대 **200건** 보여줍니다. 첫 조회는 최근 24시간이며, 기본 조회에서 남은 메시지는 다시 실행하면 이어서 보여줍니다.
 
-대상은 **config 별칭 → `spaces/ID` → `--dm <사람>` → 스페이스 표시 이름** 순서로 해석합니다. 표시 이름은 대소문자·공백을 무시한 정확 일치를 먼저 찾고, 없으면 부분 일치합니다. 후보가 여러 개면 목록을 보여 주고 exit 1로 끝납니다. 이름을 못 찾으면 목록을 한 번 갱신합니다. 스페이스 ID를 직접 찾을 필요가 없습니다. `--dm`은 `users/ID`, 이메일 또는 수집된 발신자 이름을 받으며, 동명이인은 이메일로 구분합니다. 기존 DM만 찾고 새 DM을 만들지 않습니다. 위치 인자와 `--dm`은 함께 쓸 수 없습니다.
+대상은 **config 별칭 → `spaces/ID` → `--dm <사람>` → 스페이스 표시 이름** 순서로 해석합니다. 방 표시 이름은 대소문자·공백을 무시한 정확 일치를 먼저 찾고, 없으면 부분 일치합니다. 후보가 여러 개면 목록을 보여 주고 exit 1로 끝납니다. 이름을 못 찾으면 방 목록을 한 번 갱신합니다. 스페이스 ID를 직접 찾을 필요가 없습니다. `--dm`은 `users/ID`, 이메일 또는 사람 이름을 받습니다. 사람 이름은 **로컬 people 등록부의 정확 일치 → 수집 발신자 → 회사 디렉터리** 순서로 찾고, 디렉터리는 정확 일치가 없으면 부분 일치를 사용합니다. 동명이인은 이름·이메일·ID 후보를 보여 주며 추측하지 않습니다. 위치 인자와 `--dm`은 함께 쓸 수 없습니다.
+
+`send`는 DM이 없으면 선택 권한 `chat.spaces.create`로 만든 뒤 전송합니다. `--dry-run`은 `새 DM을 만들어 보냄` 미리보기만 표시하고 DM 생성·사람 등록을 하지 않습니다. `fetch`·`collect`·`wait`는 기존 DM만 사용합니다. `mailman people [검색어]`는 등록된 사람의 이름·users/ID·이메일·출처를 보여 주고, `people --forget users/숫자ID`는 한 명의 등록을 지웁니다(메시지는 유지). 디렉터리 후보 전체는 저장하지 않고 확정된 한 명만 저장합니다.
 
 config에 없는 방도 해당 호출에서 사용할 수 있습니다. `--save <새 별칭>`을 붙일 때만 별칭을 저장하며, 기존 별칭은 덮어쓰지 않습니다. 출력 첫 줄의 `[대상] 이름 (종류, spaces/...)`를 확인하세요. 별칭·리터럴의 표시 정보가 캐시에 없으면 입력 이름과 `SPACE_TYPE_UNSPECIFIED`를 표시합니다. `mailman spaces --refresh`로 표시 정보를 채울 수 있습니다.
 
 설치기는 설정 파일을 만들지 않습니다. 첫 `--save`가 0600 설정 파일을 만들며 **처음 저장한 별칭이 기본 방**입니다. 대상을 생략하면 이 방을 사용합니다. **바꾸려면 `--save <별칭> --default`**를 붙이세요. 새 대상을 저장하면서 기본으로 정하거나 `mailman spaces --save dev --default`로 기존 별칭의 기본 지정만 바꿀 수 있습니다. 기존 별칭의 `space` 값과 다른 필드는 보존하며, 다른 방으로 덮어쓰는 요청은 거절합니다. `config.example.json`은 문서 참고용입니다.
+
+config 파일이 없거나 `spaces: {}`와 빈/생략된 `defaultSpace`를 사용해도 명시 대상은 동작합니다. 기본 방은 대상을 생략할 때만 필요하며, 없으면 대상 지정이나 `mailman spaces '검색어' --save <별칭>`을 안내합니다. 잘못된 JSON·형식·읽기 권한과 등록되지 않은 기본 별칭은 계속 오류로 처리합니다.
 
 `wait`는 실행 시각부터, `send --wait`는 방금 보낸 메시지의 생성 시각부터 내 메시지를 제외한 답장을 기다립니다. 기본값은 `--quiet 60s --timeout 30m --interval 15s`입니다. 짧은 답장이 이어지면 quiet를 다시 세고, 조용해졌을 때 한 묶음으로 보여 줍니다. 첫 답장 후 최대 10분과 전체 timeout 중 빠른 시점에도 묶음을 반환합니다. `--thread`·`--from`으로 범위를 좁힐 수 있습니다. 대기 전 안 읽은 다른 사람 메시지는 먼저 표시합니다. 이 과거 메시지와 답장 묶음은 누락 없이 모두 표시하므로 일반 fetch의 200건 상한을 적용하지 않습니다.
 
@@ -85,9 +95,9 @@ curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/inst
 
 **A. 설정을 마친 동료에게 클라이언트 JSON을 받았다면 [설정 가이드 8단계부터(약 5분)](https://thewronghand-bigs.github.io/mailman/setup#step-8), B. 처음부터 혼자 설정한다면 [1단계부터(약 20분)](https://thewronghand-bigs.github.io/mailman/setup#step-1)** 진행하세요.
 
-이어서 `mailman doctor`로 점검하고, `mailman spaces '검색어' --save dev`로 방을 등록하세요. 후보가 여러 개면 표시 이름으로 검색 범위를 좁힙니다. 처음 저장한 별칭이 기본 방이며 바꾸려면 `--default`를 붙입니다. 설정 파일을 직접 편집할 필요가 없습니다.
+이어서 `mailman doctor`로 점검하면 됩니다. 이름을 지정한 DM 전송에는 방 등록이 필요 없습니다. 기본 방을 쓰려면 `mailman spaces '검색어' --save dev`로 등록하세요. 후보가 여러 개면 표시 이름으로 검색 범위를 좁힙니다. 처음 저장한 별칭이 기본 방이며 바꾸려면 `--default`를 붙입니다. 설정 파일을 직접 편집할 필요가 없습니다.
 
-오류가 나면 먼저 `mailman doctor`를 실행하세요. 실패한 항목에서 가이드의 해결 단계로 바로 이동할 수 있습니다. 실패는 exit 1, 경고만 있으면 exit 0이며, 설정·권한·DB를 자동 변경하지 않습니다. Codex 설치·업데이트·백업과 경로 설정은 [INSTALL.md](INSTALL.md)를 참고하세요.
+오류가 나면 출력된 안내를 먼저 따르고, 해결되지 않을 때 `mailman doctor`를 실행하세요. 실패한 항목에서 가이드의 해결 단계로 바로 이동할 수 있습니다. 실패는 exit 1, 경고만 있으면 exit 0이며, 설정·권한·DB를 자동 변경하지 않습니다. Codex 설치·업데이트·백업과 경로 설정은 [INSTALL.md](INSTALL.md)를 참고하세요.
 
 ### 개인 컨벤션 (`local.md`)
 
@@ -150,7 +160,7 @@ network_access = true
 
 인증은 임의 포트 `127.0.0.1` loopback, PKCE S256, state 검증을 사용합니다. refresh token·이메일·허용 스코프·Google 계정 ID(`user_name: users/<sub>`)를 0600 파일에 저장하며, access token은 매 실행마다 새로 발급받아 메모리에서만 사용합니다. 기존 토큰에 계정 ID가 없으면 첫 대기 때 userinfo로 한 번 보완합니다. id_token 원문은 저장하지 않습니다.
 
-요청 스코프는 다음 여섯 개입니다. 기존 필수 권한 4개+`openid`는 그대로이며, 리액션 권한은 선택입니다.
+요청 스코프는 다음 여덟 개입니다. 기존 필수 권한 4개+`openid`는 그대로이며, 리액션·디렉터리 검색·DM 생성 권한은 선택입니다.
 
 - `openid`
 - `https://www.googleapis.com/auth/userinfo.email`
@@ -158,8 +168,10 @@ network_access = true
 - `https://www.googleapis.com/auth/chat.messages.readonly`
 - `https://www.googleapis.com/auth/chat.messages.create`
 - `https://www.googleapis.com/auth/chat.messages.reactions.create` (선택: 리액션)
+- `https://www.googleapis.com/auth/directory.readonly` (선택: 회사 디렉터리 이름·이메일 검색)
+- `https://www.googleapis.com/auth/chat.spaces.create` (선택: 첫 DM 생성)
 
-기존 사용자는 리액션을 쓰기 전에 `mailman auth`를 다시 실행해야 합니다. 리액션 스코프가 없는 토큰도 기존 조회·전송·대기는 정상 동작하고, `react`만 exit 2로 재인증을 안내합니다.
+기존 사용자는 v2.4 기능을 쓰기 전에 클라이언트 프로젝트의 **People API 사용 설정**과 **Google Auth Platform 데이터 액세스의 두 스코프 추가**를 마친 뒤 `mailman auth`를 다시 실행하세요([업그레이드 안내](https://thewronghand-bigs.github.io/mailman/setup#upgrade-v2-4)). 동료 프로젝트를 쓰면 콘솔 설정은 프로젝트 소유자가 한 번만 하고 각자 재인증합니다. 선택 권한이 없는 토큰도 기존 조회·전송·대기는 정상 동작하며, 해당 기능을 사용할 때만 안내합니다. 리액션 권한도 필요할 때 재인증하면 됩니다.
 
 `mailman send`는 **로그인한 사용자 명의**로 본문 앞에 `[🤖 <라벨>] ` 태그를 붙입니다. 라벨은 `--agent claude|codex`(대소문자 무시)로 `Claude`/`Codex`를 지정하고, 없으면 환경변수 `MAILMAN_AGENT`(같은 값)를, 둘 다 없으면 중립 라벨 `AI`(`[🤖 AI] `)를 씁니다. 그 밖의 값은 오류입니다. `/mailman` 커맨드는 `--agent claude`, Codex `$mailman` 스킬은 `--agent codex`로 보냅니다.
 
