@@ -1,6 +1,6 @@
 ---
 name: mailman
-description: Google Chat 스페이스의 새 메시지를 mailman CLI로 수집·조회해 작업에 영향 주는 내용만 보고하고, 사용자 승인 후 텍스트 답장이나 카드를 보낸다. 사용자가 $mailman, "메일맨", "채팅 확인", "백엔드 스펙 왔는지 봐줘", "Chat에 보내줘"라고 할 때 쓴다.
+description: Google Chat 메시지 보내기와 받기 모두 담당하는 mailman CLI. 사람·방 이름으로 DM/메시지 전송(첨부·리액션·답장 대기 포함)과 새 메시지·스펙·핸드오버 조회. 사용자가 $mailman, "메일맨", "○○님께 구글챗으로 보내/물어봐", "채팅 확인", "스펙 왔는지 봐줘"라고 할 때 쓴다. 전송만 할 때는 fetch를 실행하지 않는다(seen 커서가 전진함).
 ---
 
 # mailman (Codex)
