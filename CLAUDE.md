@@ -1,4 +1,4 @@
-# claude-mailman v2.3
+# claude-mailman v2.4
 
 Google Chat API를 사용자 OAuth로 호출해 스페이스 메시지를 SQLite에 저장하고, Claude Code 슬래시 커맨드·Codex 스킬 또는 CLI로 조회/전송하는 파이프라인. 배포는 `bun build --compile` 단일 실행 파일(`~/.claude/bin/mailman`)이며, OAuth 클라이언트는 본인 프로젝트에서 만들거나 설정을 마친 동료의 프로젝트에서 사람마다 따로 발급받는다.
 
@@ -12,6 +12,7 @@ scripts/mailman/
 ├─ auth.ts          # loopback + PKCE OAuth, refresh token 저장/갱신
 ├─ doctor.ts        # 파일·권한·설정·인증·Chat API 진단과 설정 가이드 단계 안내
 ├─ chat.ts          # Chat API 목록/메시지 조회·media 다운로드·텍스트/리액션 전송
+├─ create-space.ts  # 이름 있는 스페이스 생성·멤버 해석·미리보기·별칭 저장
 ├─ download.ts      # 첨부 저장·재사용·텍스트 판정·조회 펼치기
 ├─ upload.ts        # 전송 파일 전체 검증·multipart 스트리밍·업로드 실패 안내
 ├─ react.ts         # 허용 이모지와 리액션 결과 출력
@@ -25,7 +26,7 @@ scripts/mailman/
 ├─ fetch.ts         # seen 이후 조회 → 스레드/이전 맥락 출력 → seen 저장
 ├─ send.ts          # 태그 접두사/답글을 붙인 전송 본문
 ├─ wait.ts          # 답장 폴링, quiet 묶음, 시그널·seen 처리
-├─ cli.ts           # 단일 진입점: mailman <auth|doctor|spaces|collect|fetch|send|wait|download|react>, --help, --version
+├─ cli.ts           # 단일 진입점: mailman <auth|doctor|spaces|create-space|people|collect|fetch|send|wait|download|react>, --help, --version
 ├─ mailman-dev      # 개발 실행기: bun 탐색 후 cli.ts 실행 (install.sh --dev가 링크)
 ├─ config.example.json
 ├─ tests/           # 실제 네트워크를 차단한 bun test
@@ -35,7 +36,7 @@ scripts/mailman/
 - `scripts/build.sh`: `dist/mailman-darwin-{arm64,x64}` 빌드·버전 주입·ad-hoc 서명·스모크. `dist/`는 gitignore.
 - `install.sh`: 기본은 GitHub 최신 릴리스 바이너리와 같은 태그의 커맨드·스킬 설치, `--dev`는 레포 심볼릭 링크. `--target claude|codex|all`(또는 `MAILMAN_TARGET`, 기본 claude)로 슬래시 커맨드·Codex 스킬 설치 대상을 고른다. 릴리스 모드는 모든 파일을 임시 디렉터리에 받아 검증한 뒤 한꺼번에 설치하고, 다운로드가 실패하면 기존 설치를 건드리지 않는다. 각 파일은 같은 디렉터리 임시 파일 → `mv` 한 번으로 교체한다. 실행 파일 백업은 직전 1개(`mailman.bak`), 커맨드·스킬은 `.bak.<타임스탬프>`. Codex `--dev`는 `skills/mailman` **디렉터리**를 링크한다(Codex는 링크된 `SKILL.md` 파일을 읽지 않는다). `uninstall.sh`는 실행 파일(+`mailman.bak`)·커맨드·Codex 스킬만 지운다. 테스트는 `tests/shell.test.ts`(가짜 curl로 릴리스 모드 검증).
 - `docs/`: GitHub Pages(main `/docs`) 공개 문서. `index.md`(홈), `setup.md`(사용자별 OAuth 클라이언트 설정 가이드), `privacy.md`(개인정보처리방침). 공개되므로 사내 정보·실명을 넣지 않는다. `privacy.md`의 저장 항목은 `store.ts`·`auth.ts`·`collector.ts`가 실제로 저장하는 것과 맞춘다(저장 필드를 바꾸면 방침도 고친다).
-- `commands/mailman.md`: `/mailman` 증분 수집/조회, 승인 후 전송 절차.
+- `commands/mailman.md`: `/mailman` 증분 수집/조회, 승인 후 전송·스페이스 생성 절차.
 - `commands/mailman-deep.md`: `/mailman-deep` 최근 30일 백필 재수집.
 - `codex-skills/mailman/SKILL.md`: Codex `$mailman` 스킬. 커맨드 문서와 같은 절차(조회·보고 기준·승인 전송·카드 웹훅)를 Claude 전용 문법 없이 쓰고 샌드박스 밖 실행을 안내한다. 커맨드 절차를 바꾸면 이 파일도 같이 고친다.
 - 설치기는 설정 파일을 만들거나 수정하지 않는다. 첫 `--save`가 0600 설정 파일과 기본 방을 만들며 `config.example.json`은 문서 참고용이다. `spaces --save`도 공통 대상 해석을 쓴다. `--save <별칭> --default`는 새 별칭 저장과 기본 방 지정을 함께 하거나 같은 방의 기존 별칭의 기본 지정만 바꾸며 space·추가 필드는 보존한다. `spaces --save <기존 별칭> --default`는 대상을 생략해도 그 별칭을 선택한다. `--default` 단독은 인자 오류이며 `send --dry-run`은 기본 방도 변경하지 않는다.
@@ -68,9 +69,9 @@ scripts/mailman/
 - 설정/환경변수 해석은 `runtime.ts`에 집중한다.
 - 레포·실행 파일·릴리스에 client id/secret, 토큰, webhook URL, 실제 스페이스 ID를 넣지 않는다(공개 레포). 토큰, client secret, webhook URL을 출력하지 않는다.
 - `mailman auth --client <파일>`은 `installed` 형식을 검증해 클라이언트 파일 경로로 0600 복사 후 로그인한다. 클라이언트 파일이 없으면 설정 가이드 URL(`runtime.ts`의 `SETUP_GUIDE_URL`)을 안내하고 exit 2.
-- `mailman doctor`는 설정·인증·Chat API 접근을 순서대로 진단하고 가이드 단계 링크를 표시한다. 실패는 exit 1, 경고만 있으면 0이며 의존 단계는 건너뛴다. 파일·권한·DB를 변경하지 않고 API는 `GET /v1/spaces?pageSize=1`만 조회한다. 원문 오류·인증정보는 출력하지 않는다.
+- `mailman doctor`는 설정·인증·Chat API 접근을 순서대로 진단하고 가이드 단계 링크를 표시한다. 실패는 exit 1, 경고만 있으면 0이며 의존 단계는 건너뛴다. 파일·권한·DB를 변경하지 않고 API는 `GET /v1/spaces?pageSize=1`과, 디렉터리 스코프가 있을 때 People API 검색 1회만 조회한다. 원문 오류·인증정보는 출력하지 않는다.
 - access token은 메모리에서만 쓰며 매 실행마다 refresh한다. 토큰 없음은 exit 2, `invalid_grant`는 재인증 안내와 exit 3.
-- OAuth 요청/허용 스코프는 기존 4개+openid와 `chat.messages.reactions.create` 여섯 개다. 필수 검사는 `REQUIRED_SCOPES`의 기존 다섯만 유지한다. 리액션 권한 없는 토큰은 react만 exit 2와 `mailman auth` 재실행을 안내하고 나머지 명령은 정상 동작한다. 카드 전송은 기존 웹훅 curl 절차를 쓴다.
+- OAuth 요청/허용 스코프는 기존 4개+openid와 선택 `chat.messages.reactions.create`·`directory.readonly`·`chat.spaces.create` 여덟 개다. 필수 검사는 `REQUIRED_SCOPES`의 기존 다섯만 유지한다. 선택 권한이 없으면 해당 기능만 재인증을 안내한다. 카드 전송은 기존 웹훅 curl 절차를 쓴다.
 - 기본/지정 별칭 또는 이름·리터럴·DM으로 선택한 방의 모든 메시지를 저장하고 조회에서도 모든 발신자를 포함한다. 미등록 방은 해당 호출에서만 사용한다. 무엇이 작업에 중요한지는 출력을 읽는 Claude가 판단한다.
 - `mailman fetch [스페이스]`는 조회 전에 수집을 시도하고(`--no-collect`로 생략, 실패해도 DB 출력) mailman 자체의 스페이스별 seen 이후 메시지(첫 조회는 최근 24시간)를 오래된 것부터 최대 200건 출력한다. 스레드는 가장 이른 새 메시지순, 내부는 시간순이며 이전 맥락은 스레드당 최근 5건과 생략 건수를 표시한다.
 - 출력 성공 후 실제 표시한 새 메시지의 최대 `create_time`을 `seenCreateTime:<space>`에 저장한다. 동일 시각의 200건 경계를 잇기 위해 `seenMessageName:<space>`도 저장한다. 출력 실패/새 메시지 0건이면 seen을 바꾸지 않는다. Google Chat 읽음 상태와는 무관하다.
@@ -86,9 +87,12 @@ scripts/mailman/
 
 - `resolve.ts`에서 config 별칭 → 리터럴 `spaces/ID` → `--dm <사람>` → 표시 이름 순으로 해석한다. 위치 인자와 DM은 함께 받지 않는다. NFKC·소문자·공백 제거 후 정확 일치 우선, 없으면 부분 일치하며 유일한 후보만 사용한다. 여러 개면 이름·종류·ID 목록과 exit 1, 0개면 목록을 한 번 갱신한다. 스페이스 ID를 사용자에게 묻지 않는다.
 - `spaces [검색어] [--refresh]`는 설정 파일 없이 `spaces.list`로 목록을 캐시한다(100개씩 최대 1,000페이지, 완전 수신 후 교체). DB `spaces`에는 name/display_name/space_type/updated_at을 저장한다. 별칭/리터럴의 캐시가 없으면 입력 이름·SPACE_TYPE_UNSPECIFIED로 표시해 오프라인 조회를 유지한다.
-- DM은 users/ID·이메일 또는 DB 발신자 표시 이름의 유일한 sender_name으로 `spaces:findDirectMessage`를 호출한다. 동명이인은 이메일로 구분하며 404에서는 새 방을 만들지 않는다. `--save`는 기존 별칭 충돌을 거절하고 config의 다른 필드를 보존해 0600 원자 쓰기한다. `send --dry-run`으로 대상·본문을 미리 볼 수 있다.
+- config 파일이 없으면 빈 설정을 쓰며 defaultSpace의 빈 문자열·키 생략도 허용한다. 명시 대상은 config 없이 동작하고, 대상 생략 시에만 기본 방을 요구한다. JSON·형식·읽기 권한·등록되지 않은 기본 별칭 오류는 계속 차단한다.
+- DM은 users/ID·이메일 리터럴을 그대로 쓰고, 이름은 people 등록부 정확 일치 → DB 발신자 → 선택 People API 디렉터리 검색 순으로 해석한다. 동명이인은 이메일·ID 후보를 표시하고 추측하지 않는다. 이름으로 확정된 한 명의 ID·이름·이메일·source·updated_at만 people에 저장한다. `people [검색어]`·`people --forget users/숫자ID`로 조회·삭제한다. dry-run은 등록·갱신하지 않는다.
+- `spaces:findDirectMessage`가 404면 send만 본문·옵션 검증 뒤 `spaces:setup`으로 DM을 만들어 캐시하고 전송한다. dry-run은 생성 예정만 표시하고 fetch/collect/wait는 기존 DM만 사용한다. `--save`는 기존 별칭 충돌을 거절하고 config의 다른 필드를 보존해 0600 원자 쓰기한다. `send --dry-run`으로 대상·본문을 미리 볼 수 있다. 생성 POST도 재시도하지 않는다.
+- `create-space <표시 이름> --member <사람> [--member <사람> ...] [--save <별칭>] [--default] [--dry-run]`은 이름 있는 SPACE만 만든다. `resolveChatPerson`으로 --dm과 같은 경로를 재사용해 모든 멤버를 확정한 뒤 중복을 합쳐 1~20명을 초대한다. 본인·모호·미발견 멤버는 문제 인자와 함께 거절하고 생성하지 않는다. `ChatClient.setupSpace`와 `setupDirectMessage`는 공통 함수로 spaces:setup을 호출하며 선택 chat.spaces.create가 없으면 exit 2와 재인증을 안내한다. 성공한 space는 캐시하고 확정된 사람은 기존 DM 규약대로 upsert한다. --save는 기존 별칭을 덮어쓰지 않는다. dry-run은 이름·멤버·별칭 예정만 출력하고 생성·사람 등록·별칭 저장하지 않는다. 생성 POST는 재시도하지 않고 실패 시 Chat에서 생성 여부를 확인하도록 안내한다. 생성 후 로컬 저장·출력 실패는 이미 생성된 결과와 재생성 금지를 알린다. 커맨드·스킬은 미리보기를 보여 주고 승인 후 생성하며, 사용자가 이름·멤버를 명시해 만들라고 했다면 승인으로 본다. local.md로 생성 승인을 완화할 수 없다.
 - `wait`는 실행 시각, `send --wait`는 생성 응답의 createTime 이후를 폴링한다. 기본 quiet 60s·timeout 30m·interval 15s, 첫 답장 후 최대 10분과 timeout 중 빠른 시점까지 묶는다. 중복 수신은 quiet를 늘리지 않는다. quiet 경계도 폴링하며 전체/묶음 제한 시각에는 진행 중 API도 중단한다.
-- 토큰의 user_name은 auth id_token의 sub에서 얻은 users/ID다. 기존 토큰은 첫 대기 때 userinfo로 한 번 보완한다. 전송 sender.name 불일치는 경고하고 두 ID 모두 내 메시지에서 제외한다. 대기용 계정 조회에는 스코프를 추가하지 않는다.
+- 토큰의 user_name은 auth id_token의 sub에서 얻은 users/ID다. 기존 토큰은 첫 대기나 스페이스 생성 시 userinfo로 한 번 보완한다. 전송 sender.name 불일치는 경고하고 두 ID 모두 내 메시지에서 제외한다. 계정 조회에는 스코프를 추가하지 않는다.
 - 대기 전부터 있던 다른 사람의 안 읽은 메시지를 먼저, 이후 답장 묶음을 fetch 렌더러로 출력한다. 두 섹션 모두 출력 성공 뒤 최대 시각·보조 이름으로 seen을 전진한다. thread/from 필터·출력 실패·시그널에서는 유지한다. 누락을 막기 위해 대기 출력은 200건으로 자르지 않는다.
 - 빈 대상·`--dm`·`--from`·`--save`는 정규화 후 exit 1이며 대상 생략만 기본 방을 쓴다. 빈 표시 이름은 이름 매칭에서 제외한다. 이름 해석 전 24시간 초과 캐시는 갱신하고 실패하면 경고 후 기존 캐시를 쓴다. DM에는 해석된 users/ID도 표시한다. `--dry-run --save`는 config를 바꾸지 않고 저장할 예정만 알린다.
 - `--from`은 전송 전에 ID를 확정한다. 이메일은 수집된 이메일 발신자 별칭 또는 기존 DM의 상대 발신자로 확인한다. DM 수집 기록이 없으면 최근 메시지(기본 7일, MAILMAN_BACKFILL_DAYS 적용)를 조회하며 확정하지 못하면 전송하지 않는다. 대기 중 발신자별 조회는 없으며 봇은 from에서 제외한다.

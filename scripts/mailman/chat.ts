@@ -1,4 +1,4 @@
-import { isRecord, MailmanError, RequestError, registerSecret } from "./errors";
+import { errorMessage, isRecord, MailmanError, RequestError, registerSecret } from "./errors";
 import { chatError, requestBytes, requestJson, requestUploadJson, type Fetch, type TimeoutScheduler } from "./http";
 import { parseMessageName, validateSpace, validateThread } from "./runtime";
 import { parseEmoji, type ReactionEmoji } from "./react";
@@ -24,7 +24,28 @@ export type ChatMessage = Record<string, unknown> & {
 };
 export type CreatedMessage = { name: string; thread: { name: string }; createTime?: string; sender?: ChatMessage["sender"] };
 export type ChatSpace = { name: string; displayName: string; spaceType: string };
+export type DirectoryPerson = { userName: string; displayName: string; email: string | null };
 export const MAX_PAGES = 1000;
+export const MAX_SPACE_MEMBERS = 20;
+
+// People API 오류 원문은 분류에만 쓰고 고정 안내만 출력한다.
+export function directoryErrorMessage(error: unknown): string {
+  if (error instanceof RequestError) {
+    const hint = `${error.apiStatus ?? ""} ${error.apiReasons.join(" ")} ${error.message}`;
+    if (error.status === 403) {
+      if (/SERVICE_DISABLED|accessNotConfigured|has not been used|API.*disabled|People API 사용 설정/i.test(hint)) {
+        return "HTTP 403: People API 사용 설정이 필요합니다. OAuth 클라이언트 프로젝트에서 People API를 사용 설정하세요.";
+      }
+      if (/ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient.*scope|insufficientPermissions|스코프가 없습니다/i.test(hint)) {
+        return "HTTP 403: 디렉터리 검색 스코프가 없습니다. directory.readonly 권한을 추가하고 mailman auth를 다시 실행하세요.";
+      }
+      return "HTTP 403: 디렉터리 검색 권한이 부족합니다. directory.readonly 권한과 관리자의 디렉터리 공유 정책을 확인하고 mailman auth를 다시 실행하세요.";
+    }
+    if (error.status === 401) return "HTTP 401: 디렉터리 검색 인증이 거부되었습니다. mailman auth를 다시 실행하세요.";
+    if (error.status === undefined) return "People API 네트워크 연결 실패 — 인터넷·프록시·방화벽을 확인하세요.";
+  }
+  return "People API 점검에 실패했습니다. API 사용 설정과 디렉터리 공유 정책을 확인하세요.";
+}
 
 // 생성 이름을 받은 뒤의 부가 정보 오류는 전송 실패와 구분한다.
 export class SentMessageError extends MailmanError {
@@ -42,6 +63,20 @@ export function parseSpace(value: unknown): ChatSpace {
 
 function optionalString(record: Record<string, unknown>, key: string): boolean {
   return record[key] === undefined || typeof record[key] === "string";
+}
+
+function parseDirectoryPerson(value: unknown): DirectoryPerson {
+  if (!isRecord(value) || typeof value.resourceName !== "string" || !/^people\/\d+$/.test(value.resourceName) ||
+      !Array.isArray(value.names) || !value.names.length || !value.names.every(name => isRecord(name) && typeof name.displayName === "string") ||
+      (value.emailAddresses !== undefined && (!Array.isArray(value.emailAddresses) ||
+        !value.emailAddresses.every(email => isRecord(email) && typeof email.value === "string")))) {
+    throw new MailmanError("People API 사람 응답 형식이 올바르지 않습니다.", 3);
+  }
+  const primary = (items: Record<string, unknown>[]) => items.find(item => isRecord(item.metadata) && item.metadata.primary === true) ?? items[0]!;
+  const name = primary(value.names as Record<string, unknown>[]);
+  const emails = (value.emailAddresses ?? []) as Record<string, unknown>[];
+  return { userName: value.resourceName.replace(/^people\//, "users/"), displayName: name.displayName as string,
+    email: emails.length ? primary(emails).value as string : null };
 }
 
 function optionalFields(value: unknown, fields: string[]): boolean {
@@ -203,11 +238,78 @@ export class ChatClient {
       const space = parseSpace(await this.request(url, { method: "GET", signal }));
       return { ...space, spaceType: "DIRECT_MESSAGE" };
     } catch (error: unknown) {
-      if (error instanceof MailmanError && error.message.startsWith("HTTP 404:")) {
-        throw new MailmanError("아직 DM이 없습니다. Google Chat에서 먼저 대화를 시작하세요.");
+      if (error instanceof RequestError && error.status === 404) {
+        throw new RequestError("아직 대화가 없는 DM입니다. mailman send --dm <사람>으로 첫 메시지를 보내세요.", 404, error.apiStatus, error.apiReasons);
       }
       throw error;
     }
+  }
+
+  async setupDirectMessage(user: string): Promise<ChatSpace> {
+    if (!/^users\/[A-Za-z0-9_.@+-]+$/.test(user)) throw new MailmanError("DM 상대는 users/ID 또는 이메일 별칭이어야 합니다.");
+    return this.setupSpaceWithMembers({ spaceType: "DIRECT_MESSAGE" }, [user]);
+  }
+
+  async setupSpace(displayName: string, members: string[]): Promise<ChatSpace> {
+    if (!displayName.normalize("NFKC").trim()) throw new MailmanError("표시 이름은 비어 있지 않은 값을 지정하세요.");
+    if (!members.length || members.length > MAX_SPACE_MEMBERS) throw new MailmanError(`멤버는 1~${MAX_SPACE_MEMBERS}명 지정하세요.`);
+    if (members.some(user => !/^users\/[A-Za-z0-9_.@+-]+$/.test(user))) throw new MailmanError("멤버는 users/ID 또는 이메일 별칭이어야 합니다.");
+    return this.setupSpaceWithMembers({ spaceType: "SPACE", displayName }, members);
+  }
+
+  private async setupSpaceWithMembers(requested: { spaceType: "SPACE" | "DIRECT_MESSAGE"; displayName?: string }, members: string[]): Promise<ChatSpace> {
+    try {
+      const space = parseSpace(await this.request(new URL("https://chat.googleapis.com/v1/spaces:setup"), {
+        method: "POST", body: JSON.stringify({ space: requested, memberships: members.map(name => ({ member: { name, type: "HUMAN" } })) }),
+      }));
+      return { ...space, displayName: space.displayName || requested.displayName || "", spaceType: requested.spaceType };
+    } catch (error: unknown) {
+      if (error instanceof RequestError && error.status === 403) {
+        throw new RequestError(`HTTP 403: ${requested.spaceType === "DIRECT_MESSAGE" ? "DM" : "스페이스"} 생성 권한이 부족합니다. chat.spaces.create 권한과 관리자 정책을 확인하고 mailman auth를 다시 실행하세요.`, 403, error.apiStatus, error.apiReasons);
+      }
+      // 응답이 유실돼도 생성됐을 수 있으므로 POST는 재시도하지 않는다.
+      const message = `${errorMessage(error)}\nChat에서 생성 여부를 확인한 뒤 재실행하세요.`;
+      if (error instanceof RequestError) throw new RequestError(message, error.status, error.apiStatus, error.apiReasons);
+      throw new MailmanError(message, error instanceof MailmanError ? error.exitCode : 3);
+    }
+  }
+
+  private async directoryPage(query: string, pageSize: number, pageToken = ""): Promise<{ people: DirectoryPerson[]; nextPageToken: string }> {
+    const url = new URL("https://people.googleapis.com/v1/people:searchDirectoryPeople");
+    url.search = new URLSearchParams({ query, readMask: "names,emailAddresses", sources: "DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE", pageSize: String(pageSize),
+      ...(pageToken ? { pageToken } : {}) }).toString();
+    let body: unknown;
+    try { body = await this.request(url, { method: "GET" }); }
+    catch (error: unknown) {
+      if (error instanceof RequestError && error.status === 403) {
+        throw new RequestError(directoryErrorMessage(error), 403, error.apiStatus, error.apiReasons);
+      }
+      throw error;
+    }
+    if (!isRecord(body) || (body.people !== undefined && !Array.isArray(body.people)) || !optionalString(body, "nextPageToken")) {
+      throw new MailmanError("People API 디렉터리 응답 형식이 올바르지 않습니다.", 3);
+    }
+    return { people: ((body.people ?? []) as unknown[]).map(parseDirectoryPerson), nextPageToken: typeof body.nextPageToken === "string" ? body.nextPageToken : "" };
+  }
+
+  async searchDirectoryPeople(query: string): Promise<DirectoryPerson[]> {
+    const people = new Map<string, DirectoryPerson>();
+    const tokens = new Set<string>();
+    let pageToken = "";
+    // 다음 페이지에도 동명이인이 있을 수 있으므로 모두 확인한다.
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const result = await this.directoryPage(query, 10, pageToken);
+      for (const person of result.people) people.set(person.userName, person);
+      if (!result.nextPageToken) return [...people.values()];
+      if (tokens.has(result.nextPageToken)) throw new MailmanError("People API 페이지 토큰이 반복되었습니다. 사람을 확정하지 않습니다.", 3);
+      tokens.add(result.nextPageToken);
+      pageToken = result.nextPageToken;
+    }
+    throw new MailmanError("디렉터리 검색 페이지 상한에 도달했습니다. 이메일로 지정하세요.", 3);
+  }
+
+  async checkDirectoryAccess(query: string): Promise<void> {
+    await this.directoryPage(query, 1);
   }
 
   async listMessages(space: string, after: string, maxPages = MAX_PAGES, signal?: AbortSignal): Promise<ChatMessage[]> {

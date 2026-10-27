@@ -517,7 +517,7 @@ describe("CLI 전송 후 대기", () => {
       const errors: string[] = [];
       expect(await main(["send", "--wait", "--from", mode === "unknown-name" ? "미등록" : "peer@example.test"], {
         paths, fetcher: api.fetcher, clock: clock(), env: {}, stdin: () => "질문", stdout: () => {}, stderr: text => errors.push(text),
-      })).toBe(1);
+      })).toBe(mode === "no-dm" ? 3 : 1);
       expect(api.calls.filter(call => call.url.hostname === "chat.googleapis.com" && call.init.method === "POST")).toHaveLength(0);
       expect(errors.join("\n")).not.toContain("전송은 완료됨");
     }

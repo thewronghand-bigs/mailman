@@ -17,8 +17,10 @@ export const REQUIRED_SCOPES = [
   "https://www.googleapis.com/auth/chat.messages.create",
 ] as const;
 export const REACTION_SCOPE = "https://www.googleapis.com/auth/chat.messages.reactions.create";
-// 기존 토큰도 조회·전송에 쓸 수 있다. 리액션 권한은 react에서만 요구한다.
-export const SCOPES = [...REQUIRED_SCOPES, REACTION_SCOPE] as const;
+export const DIRECTORY_SCOPE = "https://www.googleapis.com/auth/directory.readonly";
+export const SPACE_CREATE_SCOPE = "https://www.googleapis.com/auth/chat.spaces.create";
+// 선택 권한이 없는 기존 토큰도 조회·전송에 쓸 수 있다.
+export const SCOPES = [...REQUIRED_SCOPES, REACTION_SCOPE, DIRECTORY_SCOPE, SPACE_CREATE_SCOPE] as const;
 
 export type OAuthClient = { client_id: string; client_secret: string; auth_uri: string; token_uri: string };
 export type SavedToken = { refresh_token: string; email: string; scopes: string[]; user_name?: string };
@@ -81,6 +83,12 @@ function checkScopes(scopes: string[]): string[] {
 export function requireReactionScope(tokenFile: string): void {
   if (!loadToken(tokenFile).scopes.includes(REACTION_SCOPE)) {
     throw new MailmanError(`리액션 권한이 없습니다 (${REACTION_SCOPE}). mailman auth를 다시 실행하세요.`, 2);
+  }
+}
+
+export function requireSpaceCreateScope(tokenFile: string): void {
+  if (!loadToken(tokenFile).scopes.includes(SPACE_CREATE_SCOPE)) {
+    throw new MailmanError(`스페이스·DM 생성 권한이 없습니다 (${SPACE_CREATE_SCOPE}). mailman auth를 다시 실행하세요.`, 2);
   }
 }
 

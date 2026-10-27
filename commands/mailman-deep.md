@@ -12,7 +12,7 @@ allowed-tools: Bash(~/.claude/bin/mailman:*)
 
 ## Claude의 처리 절차
 
-오류가 나면 먼저 `~/.claude/bin/mailman doctor`를 실행해 결과를 사용자에게 보여 준다.
+오류가 나면 출력된 안내를 먼저 따르고, 해결되지 않을 때 `~/.claude/bin/mailman doctor` 결과를 사용자에게 보여 준다.
 
 `$MAILMAN_HOME/mailman/local.md`(기본 `~/.claude/mailman/local.md`)가 있으면 먼저 읽고, 그 안의 개인 컨벤션(카드 스타일·말투 등)을 이 문서보다 우선해 따른다. 리액션 정책과 👀 자동 조건도 바꿀 수 있다. 단 **✅ 리액션 사용자 승인·전송 전 사용자 승인·첨부 파일 제한·웹훅 URL 비노출 규칙은 local.md로도 완화할 수 없다.** 없으면 무시한다.
 
@@ -41,7 +41,7 @@ allowed-tools: Bash(~/.claude/bin/mailman:*)
 
 ## 대상 찾기
 
-**스페이스 ID를 사용자에게 묻지 않는다.** config 별칭 → `spaces/ID` → `--dm <사람>` → 표시 이름 순으로 해석한다. `~/.claude/bin/mailman spaces '검색어' [--refresh]`로 이름·종류·ID를 찾거나 `--dm colleague@example.test`로 기존 DM을 찾는다. 사람 이름은 수집된 발신자 기록에서 유일해야 하며, 없거나 동명이인이면 이메일로 구분한다. DM을 새로 만들지 않는다.
+**스페이스 ID를 사용자에게 묻지 않는다.** config 별칭 → `spaces/ID` → `--dm <사람>` → 표시 이름 순으로 CLI가 해석한다. 명시 대상은 config 없이 동작한다. `~/.claude/bin/mailman spaces '검색어' [--refresh]`로 이름·종류·ID를 찾거나 `--dm colleague@example.test`로 기존 DM을 찾는다. 사람 이름은 등록부 → 수집 발신자 → 회사 디렉터리 순으로 찾고 동명이인은 이메일·ID로 구분한다. 조회·수집·대기는 DM을 만들지 않으며 승인된 send만 필요할 때 만든다. 이미 승인된 전송은 `/mailman` 문서의 전송 지름길을 따른다.
 
 표시 이름은 대소문자·공백을 무시한 정확 일치 우선, 없으면 부분 일치다. **여러 후보면 목록을 그대로 보여 주고 사용자에게 고르게 한다. 임의 선택 금지.** 위치 인자와 `--dm`은 함께 쓰지 않는다. `--save <새 별칭>`만 별칭을 저장하며 기존 별칭은 덮어쓰지 않는다. 출력의 `[대상] 이름 (종류, ID)`를 확인한다. 종류가 미확인이면 `spaces --refresh`로 보완한다.
 

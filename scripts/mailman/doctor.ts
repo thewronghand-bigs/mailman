@@ -1,7 +1,7 @@
 // 점검 중 파일·DB를 만들지 않는다. 외부 오류 본문 대신 원인과 해결 단계만 표시한다.
-import { readFileSync, statSync } from "node:fs";
-import { loadClient, loadToken, REACTION_SCOPE, refreshAccessToken, type OAuthClient, type SavedToken } from "./auth";
-import { ChatClient } from "./chat";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { DIRECTORY_SCOPE, loadClient, loadToken, REACTION_SCOPE, refreshAccessToken, SPACE_CREATE_SCOPE, type OAuthClient, type SavedToken } from "./auth";
+import { ChatClient, directoryErrorMessage } from "./chat";
 import { isRecord, MailmanError, redact, RequestError } from "./errors";
 import type { Fetch } from "./http";
 import { loadConfig, SETUP_GUIDE_URL, type RuntimePaths } from "./runtime";
@@ -64,12 +64,13 @@ export async function runDoctor(paths: RuntimePaths, version: string, fetcher: F
     await report(status, `${label} 경로: ${JSON.stringify(path)} (${detail})`, status === "✅" ? undefined : step);
   }
 
-  const noDefault = (reason: string, placeholder = false) => report("⚠️", `설정 파일: 아직 기본 방이 없습니다 (${reason}). mailman spaces <검색어> --save <별칭>으로 등록하세요.${placeholder ? " 기존 예시 설정에서는 --default도 붙여 기본 방을 바꾸세요." : ""}`, 10);
+  const noDefault = (reason: string, placeholder = false) => report("⚠️", `설정 파일: 아직 기본 방이 없습니다 (${reason}). 명시 대상(--dm·방 이름)은 설정 없이 동작합니다. mailman spaces <검색어> --save <별칭>으로 등록하세요.${placeholder ? " 기존 예시 설정에서는 --default도 붙여 기본 방을 바꾸세요." : ""}`, 10);
   let config: ReturnType<typeof loadConfig> | undefined;
   try { config = loadConfig(paths.configFile); } catch { /* 아래에서 안전한 고정 문구로 안내한다. */ }
   if (config) {
-    const defaultSpace = config.spaces[config.defaultSpace]!.space;
-    if (/^spaces\/(?:(?:YOUR[_-]?)?SPACE[_-]?ID|A{4,}x+)$/i.test(defaultSpace)) await noDefault("예시 자리표시", true);
+    const defaultSpace = config.spaces[config.defaultSpace]?.space;
+    if (!defaultSpace) await noDefault(existsSync(paths.configFile) ? "defaultSpace 미지정" : "설정 파일 없음");
+    else if (/^spaces\/(?:(?:YOUR[_-]?)?SPACE[_-]?ID|A{4,}x+)$/i.test(defaultSpace)) await noDefault("예시 자리표시", true);
     else await report("✅", "설정 파일: JSON·형식 유효, defaultSpace가 spaces에 등록됨.");
   } else {
     let missing = false;
@@ -109,6 +110,10 @@ export async function runDoctor(paths: RuntimePaths, version: string, fetcher: F
     await report("✅", "토큰: 파일 유효, 필수 스코프 모두 포함.");
     if (token.scopes.includes(REACTION_SCOPE)) await report("✅", "리액션 스코프: 있음.");
     else await report("⚠️", "리액션 스코프 없음 — react만 불가. 필요하면 mailman auth를 다시 실행하세요.", 8);
+    if (token.scopes.includes(DIRECTORY_SCOPE)) await report("✅", "디렉터리 검색 스코프: 있음.");
+    else await report("⚠️", "디렉터리 검색 스코프 없음 — 등록되지 않은 사람 이름의 회사 디렉터리 검색만 불가. 필요하면 mailman auth를 다시 실행하세요.", 8);
+    if (token.scopes.includes(SPACE_CREATE_SCOPE)) await report("✅", "스페이스·DM 생성 스코프: 있음.");
+    else await report("⚠️", "스페이스·DM 생성 스코프 없음 — 스페이스·새 DM 생성 불가. 필요하면 mailman auth를 다시 실행하세요.", 8);
   }
 
   let accessToken: string | undefined;
@@ -128,6 +133,17 @@ export async function runDoctor(paths: RuntimePaths, version: string, fetcher: F
     catch (error: unknown) { chatError = error; }
     if (hasSpaces !== undefined) await report("✅", `Chat API: 로그인 계정 ${token.email}, ${hasSpaces ? "접근 가능한 스페이스 있음" : "접근 성공 (스페이스 없음 — mailman spaces --refresh로 확인하세요)"}.`);
     else await failure("Chat API", chatError, "chat");
+  }
+  if (token?.scopes.includes(DIRECTORY_SCOPE)) {
+    if (!accessToken || !client) await report("⚠️", "People API: 건너뜀 — 토큰 갱신이 먼저 통과해야 합니다.");
+    else {
+      let directoryError: unknown;
+      try {
+        await new ChatClient(accessToken, fetcher).checkDirectoryAccess(token.email.split("@")[0]!);
+      } catch (error: unknown) { directoryError = error; }
+      if (directoryError) await report("⚠️", `People API (선택): ${directoryErrorMessage(directoryError)}`, 2);
+      else await report("✅", "People API (선택): 회사 디렉터리 검색 접근 성공.");
+    }
   }
   return failed ? 1 : 0;
 }

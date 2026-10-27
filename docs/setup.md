@@ -16,6 +16,8 @@ Mac에 mailman을 [설치](https://github.com/thewronghand-bigs/mailman/blob/mai
 
 **A 경로**는 동료 프로젝트의 Chat 앱 구성·브랜딩·프로덕션 게시가 끝나 있으므로 **1~7단계가 필요 없습니다.** 받은 JSON과 본인 회사 Google Workspace 계정으로 인증하면 됩니다. **동료 프로젝트의 IAM 멤버일 필요도 없습니다.** 설정을 마친 사람이 JSON을 발급하는 방법은 [동료에게 클라이언트 만들어 주기](#colleague-client)를 참고하세요.
 
+첫 DM을 이름으로 찾는 v2.4 기능도 **프로젝트 소유자가 People API 사용 설정과 두 스코프 추가를 한 번만** 마치면 됩니다. 동료마다 콘솔 설정이나 프로젝트를 새로 만들 필요 없이 각자 `mailman auth`로 권한을 허용합니다. 기존 프로젝트라면 [업그레이드 안내](#upgrade-v2-4)를 먼저 확인하세요.
+
 **B 경로 준비물: 개인 Google 계정(Gmail), 회사 Google Workspace 계정, 약 20분.** Google Cloud를 처음 써도 아래 순서대로 진행하면 됩니다.
 
 회사 계정은 보통 Google Cloud 프로젝트를 만들 수 없어, 개인 계정으로 프로젝트를 만듭니다.<br>
@@ -29,9 +31,9 @@ OAuth 클라이언트는 본인 프로젝트에서 만들거나, 설정을 마�
 | 단계 | 사용할 계정 | 할 일 |
 |------|-------------|-------|
 | [1](#step-1) | 개인 | 프로젝트 만들기·프로젝트 ID 메모 |
-| [2](#step-2) | 개인 | Google Chat API 사용 설정 |
+| [2](#step-2) | 개인 | Google Chat API·People API 사용 설정 |
 | [3](#step-3) | 개인 | Chat 앱을 구성할 본인 회사 계정을 프로젝트 편집자로 추가 |
-| [4](#step-4) | 개인 | 앱 브랜딩·동의 화면 설정 |
+| [4](#step-4) | 개인 | 앱 브랜딩·동의 화면·데이터 액세스 스코프 설정 |
 | [5](#step-5) | 개인 | 프로덕션 게시 또는 테스트 사용자 등록 |
 | [6](#step-6) | 개인 | 데스크톱 앱 OAuth 클라이언트 JSON 다운로드 |
 | [7](#step-7) | 회사 | Chat 앱 구성·저장 |
@@ -58,7 +60,7 @@ OAuth 클라이언트는 본인 프로젝트에서 만들거나, 설정을 마�
 
 <a id="step-2"></a>
 
-### [개인 계정] 2. Google Chat API 사용 설정
+### [개인 계정] 2. Google Chat API·People API 사용 설정
 
 다음 주소를 엽니다.
 
@@ -67,6 +69,14 @@ https://console.cloud.google.com/apis/library/chat.googleapis.com?project=<PROJE
 ```
 
 **사용 설정**을 누릅니다. 이미 사용 설정되어 있다면 다음 단계로 넘어갑니다.
+
+회사 디렉터리에서 사람 이름·이메일을 찾으려면 같은 프로젝트의 **People API도 사용 설정**합니다.
+
+```text
+https://console.cloud.google.com/apis/library/people.googleapis.com?project=<PROJECT_ID>
+```
+
+디렉터리 검색 권한을 허용했어도 이 API가 꺼져 있으면 `SERVICE_DISABLED`가 발생합니다. 프로젝트 단위 설정이므로 동료용 클라이언트를 여러 개 발급해도 한 번만 하면 됩니다.
 
 <a id="step-3"></a>
 
@@ -111,6 +121,27 @@ https://console.cloud.google.com/auth/branding?project=<PROJECT_ID>
 | 앱 로고 | **올리지 않습니다** |
 
 **로고를 올리면 Google 브랜딩 검증 대상이 되어 게시가 막힐 수 있습니다.** 로고 없이 진행하세요. 아래 5단계의 테스트 모드로 먼저 써 볼 때는 홈페이지·개인정보처리방침 URL 입력을 생략할 수 있습니다.
+
+#### 데이터 액세스 — OAuth 스코프 추가
+
+같은 프로젝트의 **Google Auth Platform → 데이터 액세스**에서 **범위 추가 또는 삭제**를 열어 다음 스코프를 추가하고 저장합니다. 검색에 나오지 않으면 전체 URL을 직접 입력합니다.
+
+```text
+https://console.cloud.google.com/auth/scopes?project=<PROJECT_ID>
+```
+
+| 스코프 | 용도 |
+|--------|------|
+| `openid` | 계정 식별 |
+| `https://www.googleapis.com/auth/userinfo.email` | 이메일 확인 |
+| `https://www.googleapis.com/auth/chat.spaces.readonly` | 방 목록·기존 DM 찾기 |
+| `https://www.googleapis.com/auth/chat.messages.readonly` | 메시지·첨부 읽기 |
+| `https://www.googleapis.com/auth/chat.messages.create` | 승인된 메시지·첨부 전송 |
+| `https://www.googleapis.com/auth/chat.messages.reactions.create` | 리액션 (선택) |
+| `https://www.googleapis.com/auth/directory.readonly` | 회사 디렉터리 이름·이메일 검색 (v2.4 선택) |
+| `https://www.googleapis.com/auth/chat.spaces.create` | 첫 DM 생성, 이름 있는 스페이스 생성·멤버 초대 (v2.4 선택) |
+
+기존 필수 권한은 앞의 다섯 개입니다. 선택 스코프가 없어도 기존 조회·전송은 동작하며, 필요한 기능을 쓸 때만 재인증을 안내합니다. 이 콘솔 설정도 프로젝트 소유자가 한 번만 합니다.
 
 <a id="step-5"></a>
 
@@ -199,7 +230,7 @@ Mac 터미널에서 실행합니다. 파일명은 **동료에게 받은 JSON** �
 
 **`auth --client`가 성공하면 다운로드 폴더의 원본 JSON은 삭제하는 것을 권장합니다.** A 경로로 동료에게 받은 파일도 같습니다. 등록된 클라이언트 파일은 위 경로에 보관됩니다.
 
-권한은 `openid`, 이메일 확인, 스페이스 읽기, 메시지 읽기·생성, 리액션 생성의 여섯 가지입니다. 기존 토큰에 선택 리액션 권한만 없다면 조회·전송은 가능하고 `react`만 재인증이 필요합니다.
+권한은 `openid`, 이메일 확인, 스페이스 읽기, 메시지 읽기·생성, 리액션 생성, 회사 디렉터리 검색, DM 생성의 여덟 가지입니다. 마지막 세 권한은 선택이며, 없는 기존 토큰도 나머지 기능은 동작합니다. 새 사람 이름 검색과 첫 DM 생성에는 해당 선택 권한을 허용하세요.
 
 `admin_policy_enforced`로 막히면 회사 Google Workspace 관리자 정책입니다. 관리자에게 앱 접근 허용을 문의하세요. `doctor`가 Google Cloud 설정이나 관리자 정책을 바꾸지는 않습니다.
 
@@ -213,8 +244,10 @@ Mac 터미널에서 실행합니다. 파일명은 **동료에게 받은 JSON** �
 
 버전과 파일 경로·0600 권한, 설정 JSON, 데스크톱 클라이언트, 토큰·스코프, 토큰 갱신, Chat API 접근을 순서대로 점검합니다. 파일 내용·토큰·secret·클라이언트 ID 전체·웹훅 URL은 출력하지 않습니다. 설정·파일 권한·DB를 자동 수정하지 않으며, Chat API는 스페이스 1건만 조회합니다.
 
+디렉터리 검색·DM 생성 스코프 유무도 표시합니다. 디렉터리 스코프가 있으면 본인 이메일 앞부분으로 People API를 pageSize=1로 한 번 확인합니다. 선택 기능의 API 실패는 경고로만 표시하고 전체 실패로 만들지 않습니다.
+
 - **✅**: 해당 점검 통과. 모두 ✅면 완료입니다.
-- **⚠️**: 확인할 사항. 첫 사용 전 설정 파일·DB가 없을 수 있고, 리액션 권한만 빠져 있을 수도 있습니다. 안내에 따라 10단계에서 방을 찾거나 필요한 권한을 추가하세요.
+- **⚠️**: 확인할 사항. 설정 파일·기본 방이 없어도 명시 대상(--dm·방 이름)은 설정 없이 동작합니다. 선택 스코프나 People API 설정이 빠져 있으면 필요한 기능에 대해서만 안내합니다.
 - **❌**: 실패. 해당 줄의 **“해결: 설정 가이드 N단계”** 링크로 이동해 수정한 뒤 다시 실행합니다.
 - **건너뜀**: 앞 단계가 실패해 실행할 수 없는 점검입니다. 클라이언트·토큰을 먼저 고쳐야 토큰 갱신과 Chat API 점검을 합니다. 설정 파일 오류는 독립적인 인증 점검을 막지 않습니다.
 
@@ -227,6 +260,19 @@ Mac 터미널에서 실행합니다. 파일명은 **동료에게 받은 JSON** �
 ### [터미널·Claude Code·Codex] 10. 방 찾기와 첫 사용
 
 이하 `mailman`은 `~/.claude/bin/mailman`의 줄임말입니다. PATH에 없다면 전체 경로로 실행하세요.
+
+처음 보내는 사람에게도 이름만으로 DM을 보낼 수 있습니다. **config 파일이나 방 등록은 필요 없습니다.** 수신자·본문을 확인한 뒤 실행하세요.
+
+```bash
+mailman send --dm '사람 이름' --agent codex --dry-run < 본문.txt
+mailman send --dm '사람 이름' --agent codex < 본문.txt
+mailman people                 # 확정해 등록한 사람 목록
+mailman people --forget users/100001
+```
+
+미리보기는 DM 생성·사람 등록을 하지 않습니다. 실제 전송에서는 로컬 등록부 → 수집 발신자 → 회사 디렉터리 순서로 찾고, 기존 DM이 없으면 만듭니다. 동명이인은 이메일·ID 후보로 구분하며 임의로 고르지 않습니다. 조회·수집·대기는 없는 DM을 만들지 않습니다.
+
+기본 방으로 조회하려면 다음처럼 별칭을 저장합니다.
 
 ```bash
 mailman spaces '검색어'
@@ -252,13 +298,28 @@ Codex:       $mailman
 
 대상을 생략한 `/mailman`·`$mailman`·`mailman fetch`는 기본 방을 조회합니다. 다른 방은 저장한 별칭을 지정하세요. 두 도구는 같은 DB와 조회 커서를 공유합니다.
 
-설정 JSON이 깨졌거나 `defaultSpace`가 `spaces`에 없는 경우에는 `doctor`가 ❌를 표시합니다. 기존 설정을 보존하면서 JSON 문법과 기본 별칭의 등록 여부를 확인하세요. 인증부터 다시 할 필요는 없습니다.
+설정 파일이 없거나 `defaultSpace`가 빈 문자열/생략된 경우에는 명시 대상만 지정하면 됩니다. 대상 생략 시에는 기본 방 등록을 안내합니다. 설정 JSON이 깨졌거나 비어 있지 않은 `defaultSpace`가 `spaces`에 없는 경우에는 `doctor`가 ❌를 표시합니다. 기존 설정을 보존하면서 JSON 문법과 기본 별칭의 등록 여부를 확인하세요. 인증부터 다시 할 필요는 없습니다.
+
+<a id="upgrade-v2-4"></a>
+
+## 기존 사용자 — v2.4 업그레이드
+
+실행 파일을 업데이트한 뒤 새 이름 검색·첫 DM 생성을 쓰려면 다음 순서로 진행합니다. 기존 클라이언트 JSON과 메시지 DB는 그대로 사용합니다.
+
+1. 클라이언트가 속한 프로젝트에서 [2단계](#step-2)의 **People API 사용 설정**을 합니다.
+2. 같은 프로젝트의 [4단계 데이터 액세스](#step-4)에 **`https://www.googleapis.com/auth/directory.readonly`**와 **`https://www.googleapis.com/auth/chat.spaces.create`**를 추가하고 저장합니다.
+3. 각 사용자 기기에서 **`mailman auth`를 다시 실행**해 새 권한을 허용합니다. `--client`는 다시 지정할 필요가 없습니다.
+4. `mailman doctor`에서 두 스코프와 People API 접근을 확인합니다.
+
+동료가 발급한 클라이언트를 쓰는 A 경로라면 **1·2번 콘솔 설정은 프로젝트 소유자가 한 번만** 합니다. 동료들은 3번 재인증만 하면 되고 IAM에 추가될 필요도 없습니다. 디렉터리에서 0명이 나오면 회사 관리자가 디렉터리 공유를 막았을 수 있으므로 이메일로 지정하거나 관리자에게 확인하세요. 새 선택 권한이 없어도 기존 DM·방의 조회와 전송은 계속 동작합니다.
 
 <a id="colleague-client"></a>
 
 ## 동료에게 클라이언트 만들어 주기
 
 B 경로로 설정을 마친 사람이 **프로젝트를 만든 개인 계정**으로 진행합니다. [5단계의 프로덕션 게시](#step-5)와 [7단계의 Chat 앱 구성](#step-7)이 끝나 있어야 동료가 A 경로로 바로 인증할 수 있습니다. 테스트 모드로만 써 봤다면 먼저 프로덕션으로 게시하세요.
+
+v2.4의 이름 검색·첫 DM 생성을 함께 쓰려면 [2단계의 People API](#step-2)와 [4단계의 두 선택 스코프](#step-4)도 소유자 프로젝트에서 한 번 설정하세요. 동료마다 반복하지 않습니다.
 
 ```text
 https://console.cloud.google.com/auth/clients/create?project=<PROJECT_ID>
@@ -304,6 +365,8 @@ https://console.cloud.google.com/auth/clients/create?project=<PROJECT_ID>
 | 설정 파일 없음 / 예시 설정이 남음 | 기본 방 미등록 | [10단계](#step-10), 실제 방을 `--save`로 등록. 기존 예시 설정은 `--default`도 지정 | `⚠️ 설정 파일: 아직 기본 방이 없습니다` |
 | 필수 스코프 누락 / HTTP 401 | 권한 동의 누락 또는 인증 거부 | [8단계](#step-8), `mailman auth` 재실행 | `❌ 토큰: 필수 스코프가 부족함` 또는 `❌ 인증이 거부됨 (HTTP 401)` |
 | 리액션 권한 없음 | 기존 토큰에 선택 스코프 없음 | 리액션을 쓸 때 [8단계](#step-8) 재인증 | `⚠️ 리액션 스코프 없음 — react만 불가` |
+| People API `SERVICE_DISABLED` | People API 사용 설정 안 됨 | 소유자가 [2단계](#step-2) 설정 | `⚠️ People API (선택): … People API 사용 설정이 필요합니다` |
+| 디렉터리 검색·DM 생성 권한 없음 | 기존 토큰에 새 선택 스코프 없음 | [v2.4 업그레이드](#upgrade-v2-4) 후 `mailman auth` | 해당 선택 스코프 없음 경고, 나머지 기능은 정상 |
 | 연결 오류·시간 초과 | 인터넷·프록시·방화벽·실행 환경 권한 | [9단계](#step-9) | `❌ 네트워크 연결 실패`, 갱신 실패 뒤 Chat API는 `건너뜀` |
 
 [mailman 홈](index.md) · [개인정보처리방침](privacy.md)
