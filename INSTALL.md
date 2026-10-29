@@ -4,14 +4,14 @@
 
 - macOS (Apple Silicon 또는 Intel). `mailman auth`가 기본 브라우저를 `open`으로 실행합니다.
 - 대상 Google Chat 스페이스의 멤버인 회사 Google Workspace 계정. 직접 프로젝트를 만들 때는 개인 Gmail도 필요합니다.
-- **A. 설정을 마친 동료에게 클라이언트 JSON을 받았다면 [8단계부터(약 5분)](https://thewronghand-bigs.github.io/mailman/setup#step-8), B. 처음부터 혼자 설정한다면 [1단계부터(약 20분)](https://thewronghand-bigs.github.io/mailman/setup#step-1)** 진행합니다([레포 안의 설정 가이드](docs/setup.md)).
+- **A. 설정을 마친 동료에게 클라이언트 JSON을 받았다면 [8단계부터(약 5분)](https://thewronghand.github.io/mailman/setup#step-8), B. 처음부터 혼자 설정한다면 [1단계부터(약 20분)](https://thewronghand.github.io/mailman/setup#step-1)** 진행합니다([레포 안의 설정 가이드](docs/setup.md)).
 
 릴리스 설치에는 bun·Node.js가 필요 없습니다. 개발 설치(`--dev`)만 bun이 필요합니다.
 
 ## 설치
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thewronghand/mailman/main/install.sh | bash
 ```
 
 - GitHub 최신 릴리스에서 아키텍처에 맞는 `mailman-darwin-arm64` 또는 `mailman-darwin-x64`를 받아 `~/.claude/bin/mailman`에 설치합니다. Rosetta 셸에서도 Apple Silicon이면 arm64를 받습니다.
@@ -23,9 +23,9 @@ curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/inst
 - 설치 대상은 `--target claude|codex|all` 또는 `MAILMAN_TARGET`으로 고릅니다(기본 `claude`). `codex`/`all`이면 `${CODEX_HOME:-~/.codex}/skills/mailman/SKILL.md`에 `$mailman` 스킬을 설치합니다. 실행 파일은 대상과 관계없이 `~/.claude/bin/mailman` 하나입니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/install.sh | MAILMAN_VERSION=v2.0.0 bash
-curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/install.sh | MAILMAN_TARGET=all bash          # Claude + Codex
-curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/install.sh | bash -s -- --target codex       # Codex만
+curl -fsSL https://raw.githubusercontent.com/thewronghand/mailman/main/install.sh | MAILMAN_VERSION=v2.0.0 bash
+curl -fsSL https://raw.githubusercontent.com/thewronghand/mailman/main/install.sh | MAILMAN_TARGET=all bash          # Claude + Codex
+curl -fsSL https://raw.githubusercontent.com/thewronghand/mailman/main/install.sh | bash -s -- --target codex       # Codex만
 ```
 
 터미널에서 `mailman`만으로 실행하려면 `~/.claude/bin`을 PATH에 추가합니다. 추가하지 않으면 `~/.claude/bin/mailman` 전체 경로로 실행합니다.
@@ -51,7 +51,7 @@ Codex의 `$mailman` 스킬은 Claude와 같은 실행 파일·DB·seen 커서를
 
 ## 최초 설정과 인증
 
-동료에게 받은 JSON 또는 [설정 가이드](https://thewronghand-bigs.github.io/mailman/setup)에서 직접 만든 데스크톱 앱 JSON으로 **본인 회사 계정**에 로그인합니다. 동료 프로젝트의 IAM 멤버일 필요는 없습니다. JSON은 비밀번호처럼 다루고 공개·커밋하지 않습니다. 동료에게 발급할 때는 [사람별 클라이언트 전달 절차](https://thewronghand-bigs.github.io/mailman/setup#colleague-client)를 따르세요.
+동료에게 받은 JSON 또는 [설정 가이드](https://thewronghand.github.io/mailman/setup)에서 직접 만든 데스크톱 앱 JSON으로 **본인 회사 계정**에 로그인합니다. 동료 프로젝트의 IAM 멤버일 필요는 없습니다. JSON은 비밀번호처럼 다루고 공개·커밋하지 않습니다. 동료에게 발급할 때는 [사람별 클라이언트 전달 절차](https://thewronghand.github.io/mailman/setup#colleague-client)를 따르세요.
 
 ```bash
 ~/.claude/bin/mailman auth --client ~/Downloads/client_secret_XXXX.json
@@ -78,14 +78,14 @@ Codex의 `$mailman` 스킬은 Claude와 같은 실행 파일·DB·seen 커서를
 ## 제거
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thewronghand/mailman/main/uninstall.sh | bash
 ```
 
 실행 파일(직전 백업 `mailman.bak` 포함)·슬래시 커맨드·Codex 스킬만 지웁니다. `--save`로 만든 설정(이전 설치의 설정 포함)·`local.md`·DB·로그·OAuth 클라이언트·토큰과 커맨드·스킬 백업(`.bak.<타임스탬프>`)은 위치만 안내합니다. 이전 설치 경로 `~/.claude/scripts/mailman`은 심볼릭 링크면 지우고, 실제 디렉터리면 남겨 둡니다.
 
 ## 문제 해결
 
-설정·인증·API 오류는 먼저 `mailman doctor`를 실행하고 [설정 가이드의 증상별 표](https://thewronghand-bigs.github.io/mailman/setup#자주-막히는-곳)를 확인하세요. Codex에서만 쓰기·네트워크 오류가 나면 위 [Codex](#codex) 항목을 확인합니다.
+설정·인증·API 오류는 먼저 `mailman doctor`를 실행하고 [설정 가이드의 증상별 표](https://thewronghand.github.io/mailman/setup#자주-막히는-곳)를 확인하세요. Codex에서만 쓰기·네트워크 오류가 나면 위 [Codex](#codex) 항목을 확인합니다.
 
 설치 중 `다운로드 실패`는 기존 설치를 유지합니다. 네트워크와 지정한 릴리스 태그를 확인한 뒤 다시 실행하세요. 과거 메시지를 다시 보려면 `--since 7d`, 수정분·누락 보완은 `--deep`을 사용합니다.
 

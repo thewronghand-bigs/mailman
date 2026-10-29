@@ -11,7 +11,7 @@ export type Environment = Record<string, string | undefined>;
 export type RuntimePaths = ReturnType<typeof getRuntimePaths>;
 
 // 사용자별 OAuth 클라이언트 설정 가이드. 클라이언트 파일이 없을 때 안내한다.
-export const SETUP_GUIDE_URL = "https://thewronghand-bigs.github.io/mailman/setup";
+export const SETUP_GUIDE_URL = "https://thewronghand.github.io/mailman/setup";
 
 function expandPath(value: string): string {
   if (value === "~") return homedir();

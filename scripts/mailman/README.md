@@ -65,7 +65,7 @@ DM 대상은 수집된 sender 표시명을 알면 `DM: 이름 → users/ID`, 모
 
 `doctor.ts`는 경로·0600 권한, 설정 JSON과 defaultSpace, 데스크톱 클라이언트, 토큰·필수/리액션/디렉터리/스페이스·DM 생성 스코프, OAuth 갱신, `GET /v1/spaces?pageSize=1`을 순서대로 점검한다. 디렉터리 스코프가 있으면 이메일 앞부분으로 People API에 pageSize=1 요청을 한 번 한다. 선택 API 실패는 경고만 내며 전체 실패로 만들지 않는다. 파일·DB·권한·캐시·로그를 변경하지 않고 브라우저를 열지 않는다. 기본 방 메시지 조회는 하지 않는다. 파일 검증과 OAuth 갱신은 `auth.ts`, API 호출은 `chat.ts`를 공유하며 실제 네트워크 없이 fetch를 주입해 검증한다.
 
-실패가 있으면 exit 1, 경고만 있으면 0이다. 설정 파일·DB 없음과 예시 자리표시 기본 방·0600이 아닌 권한·리액션 스코프 없음은 경고다. 클라이언트 없음은 받은 JSON의 8단계 등록 또는 처음 만드는 6단계, web 유형은 6단계를 안내한다. 갱신의 invalid_client/deleted_client/unauthorized_client는 새 JSON을 받거나 만들어 auth --client로 등록하도록 6단계를 안내한다. invalid_grant는 기존 5단계 게시·재인증 안내를 유지한다. 설정 오류가 있어도 독립적인 인증 점검은 계속하고, 클라이언트·토큰 실패 뒤에는 갱신/API를 건너뛴다. 응답 원문을 출력하지 않고 원인과 [설정 가이드](https://thewronghand-bigs.github.io/mailman/setup)의 단계 링크만 표시한다. 게시 상태·브라우저 계정·관리자 콘솔은 조회하지 않는다.
+실패가 있으면 exit 1, 경고만 있으면 0이다. 설정 파일·DB 없음과 예시 자리표시 기본 방·0600이 아닌 권한·리액션 스코프 없음은 경고다. 클라이언트 없음은 받은 JSON의 8단계 등록 또는 처음 만드는 6단계, web 유형은 6단계를 안내한다. 갱신의 invalid_client/deleted_client/unauthorized_client는 새 JSON을 받거나 만들어 auth --client로 등록하도록 6단계를 안내한다. invalid_grant는 기존 5단계 게시·재인증 안내를 유지한다. 설정 오류가 있어도 독립적인 인증 점검은 계속하고, 클라이언트·토큰 실패 뒤에는 갱신/API를 건너뛴다. 응답 원문을 출력하지 않고 원인과 [설정 가이드](https://thewronghand.github.io/mailman/setup)의 단계 링크만 표시한다. 게시 상태·브라우저 계정·관리자 콘솔은 조회하지 않는다.
 
 ## 빌드
 

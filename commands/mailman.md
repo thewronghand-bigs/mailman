@@ -93,7 +93,7 @@ DM과 단발 메시지는 시각·발신자·본문·한 줄 `message name`의 �
 
 새 전송 초안을 준비할 때 출력 첫 줄의 `[대상] 이름 (종류, spaces/...)`를 확인하고 해석된 **이름·종류·ID를 표시**한다. 새 DM은 상대 users/ID와 `새 DM을 만들어 보냄` 표시를 확인한다. `send --dry-run`은 승인 전 미리보기가 필요할 때 사용한다. 이미 승인된 전송은 위 지름길로 실행한다.
 
-최초 인증은 `~/.claude/bin/mailman auth --client <다운로드한 client_secret JSON>`([설정 가이드](https://thewronghand-bigs.github.io/mailman/setup) 참조). 토큰이 없거나 `invalid_grant` 안내가 나오면 `~/.claude/bin/mailman auth`(`--client` 없이)로 다시 인증한다.
+최초 인증은 `~/.claude/bin/mailman auth --client <다운로드한 client_secret JSON>`([설정 가이드](https://thewronghand.github.io/mailman/setup) 참조). 토큰이 없거나 `invalid_grant` 안내가 나오면 `~/.claude/bin/mailman auth`(`--client` 없이)로 다시 인증한다.
 
 ## 작업 완료 시 Google Chat 전송 (승인 필수)
 

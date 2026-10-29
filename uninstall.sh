@@ -1,6 +1,6 @@
 #!/bin/bash
 # mailman 제거: 실행 파일(직전 백업 포함)과 슬래시 커맨드·Codex 스킬만 지운다. 설정·데이터·인증정보는 위치만 안내한다.
-# 사용: curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/uninstall.sh | bash
+# 사용: curl -fsSL https://raw.githubusercontent.com/thewronghand/mailman/main/uninstall.sh | bash
 set -euo pipefail
 
 CLAUDE_DIR="$HOME/.claude"

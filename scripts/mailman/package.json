@@ -1,6 +1,6 @@
 {
   "name": "claude-mailman",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "private": true,
   "description": "사용자 OAuth와 Google Chat API로 수집·조회·전송하는 로컬 메일함",
   "type": "module",
