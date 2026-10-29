@@ -82,7 +82,7 @@ describe("개발 실행기와 설치/제거", () => {
     expect(existsSync(config)).toBe(false);
     expect(existsSync(dirname(config))).toBe(false);
     const stdout = first.stdout.toString();
-    expect(stdout).toContain("https://thewronghand-bigs.github.io/mailman/setup");
+    expect(stdout).toContain("https://thewronghand.github.io/mailman/setup");
     expect(stdout).toContain("auth --client");
     expect(stdout).toContain("spaces '검색어' --save dev");
     expect(stdout).toContain("첫 --save가 0600 설정 파일을 만들고 그 별칭을 기본 방으로");
@@ -197,7 +197,7 @@ while [ $# -gt 0 ]; do
 done
 echo "$url" >> "$FAKE_SERVER/requests.log"
 if [ -n "\${FAKE_FAIL:-}" ] && [[ "$url" == *"$FAKE_FAIL"* ]]; then exit 22; fi
-if [ "$head" = 1 ]; then printf '%s' "https://github.com/thewronghand-bigs/mailman/releases/tag/${FAKE_TAG}"; exit 0; fi
+if [ "$head" = 1 ]; then printf '%s' "https://github.com/thewronghand/mailman/releases/tag/${FAKE_TAG}"; exit 0; fi
 file="$FAKE_SERVER/\${url#https://}"
 [ -f "$file" ] || exit 22
 cp "$file" "$out"
@@ -211,14 +211,14 @@ function releaseFixture() {
   const tmp = join(paths.home, "tmp");
   for (const dir of [home, fakeBin, tmp]) mkdirSync(dir, { recursive: true });
   writeFileSync(join(fakeBin, "curl"), FAKE_CURL, { mode: 0o755 });
-  const raw = join(server, "raw.githubusercontent.com/thewronghand-bigs/mailman", FAKE_TAG);
+  const raw = join(server, "raw.githubusercontent.com/thewronghand/mailman", FAKE_TAG);
   for (const file of ["commands/mailman.md", "commands/mailman-deep.md", "codex-skills/mailman/SKILL.md"]) {
     mkdirSync(dirname(join(raw, file)), { recursive: true });
     writeFileSync(join(raw, file), readFileSync(join(repoRoot, file)));
   }
   // 릴리스 자산은 --version에 성공하는 가짜 실행 파일이다. 버전 문자열로 교체 여부를 구분한다.
   const publishBinary = (version: string) => {
-    const dir = join(server, "github.com/thewronghand-bigs/mailman/releases/download", FAKE_TAG);
+    const dir = join(server, "github.com/thewronghand/mailman/releases/download", FAKE_TAG);
     mkdirSync(dir, { recursive: true });
     for (const arch of ["arm64", "x64"]) writeFileSync(join(dir, `mailman-darwin-${arch}`), `#!/bin/bash\necho "mailman ${version}"\n`);
   };

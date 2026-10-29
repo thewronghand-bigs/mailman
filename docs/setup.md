@@ -7,7 +7,7 @@ permalink: /setup
 
 ## 시작 경로 고르기
 
-Mac에 mailman을 [설치](https://github.com/thewronghand-bigs/mailman/blob/main/INSTALL.md)한 뒤, 상황에 맞는 경로로 시작하세요.
+Mac에 mailman을 [설치](https://github.com/thewronghand/mailman/blob/main/INSTALL.md)한 뒤, 상황에 맞는 경로로 시작하세요.
 
 | 경로 | 시작 단계 | 예상 시간 |
 |------|-----------|-----------|
@@ -114,10 +114,10 @@ https://console.cloud.google.com/auth/branding?project=<PROJECT_ID>
 
 | 항목 | 입력·선택할 값 |
 |------|----------------|
-| 애플리케이션 홈페이지 | `https://thewronghand-bigs.github.io/mailman/` |
-| 개인정보처리방침 | `https://thewronghand-bigs.github.io/mailman/privacy` |
+| 애플리케이션 홈페이지 | `https://thewronghand.github.io/mailman/` |
+| 개인정보처리방침 | `https://thewronghand.github.io/mailman/privacy` |
 | 서비스 약관(Terms of Service) 링크 | **비워 둡니다** |
-| 승인된 도메인 | `thewronghand-bigs.github.io` |
+| 승인된 도메인 | `thewronghand.github.io` |
 | 앱 로고 | **올리지 않습니다** |
 
 **로고를 올리면 Google 브랜딩 검증 대상이 되어 게시가 막힐 수 있습니다.** 로고 없이 진행하세요. 아래 5단계의 테스트 모드로 먼저 써 볼 때는 홈페이지·개인정보처리방침 URL 입력을 생략할 수 있습니다.
@@ -253,7 +253,7 @@ Mac 터미널에서 실행합니다. 파일명은 **동료에게 받은 JSON** �
 
 실패가 하나라도 있으면 종료 코드 1, 경고만 있으면 0입니다. 브라우저에서만 볼 수 있는 동의 화면·게시 상태는 직접 진단할 수 없습니다. 그 경우 아래 표의 화면 증상과 함께 확인하세요.
 
-네트워크 연결 실패라면 인터넷·프록시·방화벽을 확인합니다. Claude Code·Codex에서만 실패하면 해당 실행 환경의 경로·네트워크 권한도 확인하세요([설치 문서](https://github.com/thewronghand-bigs/mailman/blob/main/INSTALL.md#codex)).
+네트워크 연결 실패라면 인터넷·프록시·방화벽을 확인합니다. Claude Code·Codex에서만 실패하면 해당 실행 환경의 경로·네트워크 권한도 확인하세요([설치 문서](https://github.com/thewronghand/mailman/blob/main/INSTALL.md#codex)).
 
 <a id="step-10"></a>
 

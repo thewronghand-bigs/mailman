@@ -2,16 +2,16 @@
 # mailman 설치
 #
 # 릴리스 설치 (bun·Node 불필요):
-#   curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/install.sh | MAILMAN_TARGET=all bash
-#   curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/install.sh | MAILMAN_VERSION=v2.0.0 bash
+#   curl -fsSL https://raw.githubusercontent.com/thewronghand/mailman/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/thewronghand/mailman/main/install.sh | MAILMAN_TARGET=all bash
+#   curl -fsSL https://raw.githubusercontent.com/thewronghand/mailman/main/install.sh | MAILMAN_VERSION=v2.0.0 bash
 #
 # 개발 설치 (로컬 레포를 심볼릭 링크, bun 필요):
 #   bash install.sh --dev [--target claude|codex|all]
 set -euo pipefail
 
-REPO="thewronghand-bigs/mailman"
-SETUP_GUIDE_URL="https://thewronghand-bigs.github.io/mailman/setup"
+REPO="thewronghand/mailman"
+SETUP_GUIDE_URL="https://thewronghand.github.io/mailman/setup"
 CLAUDE_DIR="$HOME/.claude"
 BIN_DIR="$CLAUDE_DIR/bin"
 BIN_FILE="$BIN_DIR/mailman"

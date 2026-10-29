@@ -37,7 +37,7 @@ allowed-tools: Bash(~/.claude/bin/mailman:*)
 - `cardsV2`와 구형 `cards`의 카드 본문도 코드블록과 버튼 링크를 포함한 마크다운 텍스트로 펼쳐진다. 텍스트 다음에 카드를 표시하며, 멘션과 분리된 같은 스레드의 카드 메시지도 포함한다.
 - DM과 단발은 시각·발신자·본문·한 줄 message name의 시간순 간결 목록이며, 답글용 `thread name`도 한 줄로 표시한다. 그룹 실제 스레드(2건 이상)는 기존 머리·이전 맥락을 유지한다. DM은 실제 스레드도 간결 목록이므로 이전 맥락과 생략 건수를 붙이지 않는다. 그룹 스레드도 각 메시지에 한 줄 `message name`을 표시한다. 방 라벨은 `[DM: 이름 또는 users/ID]` 또는 일반 방 표시 이름(없으면 별칭/ID)이다. DM 대상은 알면 이름과 users/ID, 모르면 users/ID 한 번만 표시하고 대기 중 sender 이름도 반영한다.
 - `--with-attachments`는 표시하는 메시지당 텍스트 첨부 최대 3개·각 256KB를 내려받아 파일명·코드블록으로 펼친다. 실패 사유를 표시해 조회를 계속한다. 개별 파일은 출력의 `mailman download <메시지 name> --print`를 사용한다(기본 `$MAILMAN_HOME/mailman/attachments/`, --out으로 변경, 파일 0600·디렉터리 0700, 파일당 50MB). `--out`은 기존 디렉터리 권한을 유지하고 새 디렉터리만 0700으로 만든다. 재사용 기록은 기본 저장 경로에만 두며 `--out`에서는 기록 없이 매번 새 파일로 받는다. Drive 첨부는 링크/파일 ID와 미지원 안내만 표시한다.
-- 수집 실패 시 기존 DB를 출력하므로 오류와 마지막 성공 수집 시각을 확인한다. 최초 인증은 `~/.claude/bin/mailman auth --client <다운로드한 client_secret JSON>`([설정 가이드](https://thewronghand-bigs.github.io/mailman/setup) 참조)이고, 토큰 없음/`invalid_grant`이면 `~/.claude/bin/mailman auth`로 다시 인증한다.
+- 수집 실패 시 기존 DB를 출력하므로 오류와 마지막 성공 수집 시각을 확인한다. 최초 인증은 `~/.claude/bin/mailman auth --client <다운로드한 client_secret JSON>`([설정 가이드](https://thewronghand.github.io/mailman/setup) 참조)이고, 토큰 없음/`invalid_grant`이면 `~/.claude/bin/mailman auth`로 다시 인증한다.
 
 ## 대상 찾기
 

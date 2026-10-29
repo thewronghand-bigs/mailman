@@ -94,10 +94,10 @@ config 파일이 없거나 `spaces: {}`와 빈/생략된 `defaultSpace`를 사�
 준비물은 macOS(Apple Silicon/Intel)와 회사 Google Workspace 계정입니다. 직접 프로젝트를 만들 때는 개인 Gmail도 필요합니다. 배포본은 단일 실행 파일이라 bun·Node.js가 필요 없습니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thewronghand/mailman/main/install.sh | bash
 ```
 
-**A. 설정을 마친 동료에게 클라이언트 JSON을 받았다면 [설정 가이드 8단계부터(약 5분)](https://thewronghand-bigs.github.io/mailman/setup#step-8), B. 처음부터 혼자 설정한다면 [1단계부터(약 20분)](https://thewronghand-bigs.github.io/mailman/setup#step-1)** 진행하세요.
+**A. 설정을 마친 동료에게 클라이언트 JSON을 받았다면 [설정 가이드 8단계부터(약 5분)](https://thewronghand.github.io/mailman/setup#step-8), B. 처음부터 혼자 설정한다면 [1단계부터(약 20분)](https://thewronghand.github.io/mailman/setup#step-1)** 진행하세요.
 
 이어서 `mailman doctor`로 점검하면 됩니다. 이름을 지정한 DM 전송에는 방 등록이 필요 없습니다. 기본 방을 쓰려면 `mailman spaces '검색어' --save dev`로 등록하세요. 후보가 여러 개면 표시 이름으로 검색 범위를 좁힙니다. 처음 저장한 별칭이 기본 방이며 바꾸려면 `--default`를 붙입니다. 설정 파일을 직접 편집할 필요가 없습니다.
 
@@ -112,8 +112,8 @@ curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/inst
 Codex CLI는 `${CODEX_HOME:-~/.codex}/skills/mailman/SKILL.md`를 `$mailman` 스킬로 읽습니다. 설치 대상에 `codex`를 넣으면 이 스킬을 함께 설치합니다. 실행 파일은 대상과 관계없이 `~/.claude/bin/mailman` 하나입니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/install.sh | MAILMAN_TARGET=all bash     # Claude + Codex
-curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/install.sh | bash -s -- --target codex    # Codex만
+curl -fsSL https://raw.githubusercontent.com/thewronghand/mailman/main/install.sh | MAILMAN_TARGET=all bash     # Claude + Codex
+curl -fsSL https://raw.githubusercontent.com/thewronghand/mailman/main/install.sh | bash -s -- --target codex    # Codex만
 ```
 
 - **Claude와 같은 DB·seen 커서를 공유합니다.** 한쪽에서 기본 조회로 본 메시지는 다른 쪽 기본 조회에서 새 메시지로 나오지 않습니다. 다시 보려면 `--since`를 씁니다.
@@ -175,7 +175,7 @@ network_access = true
 - `https://www.googleapis.com/auth/directory.readonly` (선택: 회사 디렉터리 이름·이메일 검색)
 - `https://www.googleapis.com/auth/chat.spaces.create` (선택: 이름 있는 스페이스 생성·멤버 초대, 첫 DM 생성)
 
-기존 사용자는 v2.4 기능을 쓰기 전에 클라이언트 프로젝트의 **People API 사용 설정**과 **Google Auth Platform 데이터 액세스의 두 스코프 추가**를 마친 뒤 `mailman auth`를 다시 실행하세요([업그레이드 안내](https://thewronghand-bigs.github.io/mailman/setup#upgrade-v2-4)). 동료 프로젝트를 쓰면 콘솔 설정은 프로젝트 소유자가 한 번만 하고 각자 재인증합니다. 선택 권한이 없는 토큰도 기존 조회·전송·대기는 정상 동작하며, 해당 기능을 사용할 때만 안내합니다. 리액션 권한도 필요할 때 재인증하면 됩니다.
+기존 사용자는 v2.4 기능을 쓰기 전에 클라이언트 프로젝트의 **People API 사용 설정**과 **Google Auth Platform 데이터 액세스의 두 스코프 추가**를 마친 뒤 `mailman auth`를 다시 실행하세요([업그레이드 안내](https://thewronghand.github.io/mailman/setup#upgrade-v2-4)). 동료 프로젝트를 쓰면 콘솔 설정은 프로젝트 소유자가 한 번만 하고 각자 재인증합니다. 선택 권한이 없는 토큰도 기존 조회·전송·대기는 정상 동작하며, 해당 기능을 사용할 때만 안내합니다. 리액션 권한도 필요할 때 재인증하면 됩니다.
 
 `mailman send`는 **로그인한 사용자 명의**로 본문 앞에 `[🤖 <라벨>] ` 태그를 붙입니다. 라벨은 `--agent claude|codex`(대소문자 무시)로 `Claude`/`Codex`를 지정하고, 없으면 환경변수 `MAILMAN_AGENT`(같은 값)를, 둘 다 없으면 중립 라벨 `AI`(`[🤖 AI] `)를 씁니다. 그 밖의 값은 오류입니다. `/mailman` 커맨드는 `--agent claude`, Codex `$mailman` 스킬은 `--agent codex`로 보냅니다.
 
@@ -189,7 +189,7 @@ network_access = true
 
 본문이 있으면 태그+본문, 비어 있고 첨부만 있으면 태그만 보냅니다. 태그를 끄면 텍스트 없이 첨부만 보냅니다. TTY에서는 본문 입력 없이 첨부만 보낼 수 있고 파이프에서는 `< /dev/null`로 빈 본문을 지정할 수 있습니다. `--thread`·`--wait`·`--agent`·`--no-tag`·`--dry-run`과 함께 쓸 수 있으며 기존 옵션 간 배타 규칙은 유지됩니다. `--dry-run`은 업로드하지 않고 파일 경로·이름·크기를 표시하며 성공 출력에는 첨부 이름 목록과 실제 경로가 나옵니다.
 
-Claude/Codex는 사용자가 지정한 파일만 첨부하며 경로·이름·크기를 전송 미리보기에 포함해 승인받습니다. `.env`·키·토큰·자격증명 파일은 첨부하지 않고 경고하며, 이 제한은 완화할 수 없습니다. 동료용 OAuth 클라이언트 JSON도 **mailman으로 보내지 말고 사내 메신저에서 직접 첨부해 DM으로 보내세요**([전달 절차](https://thewronghand-bigs.github.io/mailman/setup#colleague-client)). 핸드오버 md 작성·전송 요청은 먼저 파일로 쓴 뒤 그 경로를 미리보기에 넣어 승인받고 첨부합니다.
+Claude/Codex는 사용자가 지정한 파일만 첨부하며 경로·이름·크기를 전송 미리보기에 포함해 승인받습니다. `.env`·키·토큰·자격증명 파일은 첨부하지 않고 경고하며, 이 제한은 완화할 수 없습니다. 동료용 OAuth 클라이언트 JSON도 **mailman으로 보내지 말고 사내 메신저에서 직접 첨부해 DM으로 보내세요**([전달 절차](https://thewronghand.github.io/mailman/setup#colleague-client)). 핸드오버 md 작성·전송 요청은 먼저 파일로 쓴 뒤 그 경로를 미리보기에 넣어 승인받고 첨부합니다.
 
 ## 첨부와 리액션
 
@@ -235,6 +235,6 @@ bash scripts/build.sh        # dist/mailman-darwin-arm64, dist/mailman-darwin-x6
 
 테스트는 fetch를 주입하고 실제 네트워크를 차단합니다. 자세한 스키마와 종료 코드는 [런타임 문서](scripts/mailman/README.md)를 참고하세요. 제거는 `uninstall.sh`이며, 실행 파일(직전 백업 포함)·슬래시 커맨드·Codex 스킬만 지우고 설정·데이터·인증정보와 커맨드·스킬 백업은 위치만 안내합니다.
 
-- 홈페이지: <https://thewronghand-bigs.github.io/mailman/>
-- 설정 가이드: <https://thewronghand-bigs.github.io/mailman/setup>
-- 개인정보처리방침: <https://thewronghand-bigs.github.io/mailman/privacy>
+- 홈페이지: <https://thewronghand.github.io/mailman/>
+- 설정 가이드: <https://thewronghand.github.io/mailman/setup>
+- 개인정보처리방침: <https://thewronghand.github.io/mailman/privacy>

@@ -16,7 +16,7 @@ mailman은 Google Chat 스페이스의 메시지를 로컬 SQLite에 모아 두�
 mailman은 작업 폴더 밖인 `~/.claude/{inbox,logs,secrets,mailman}`에 읽고 쓰며 Google API(`oauth2.googleapis.com`, `chat.googleapis.com` 등)로 네트워크를 쓴다. 기본 `workspace-write` 샌드박스에서는 쓰기나 네트워크가 막혀 실패할 수 있다.
 
 - `mailman` 명령은 **샌드박스 밖 실행(권한 상승)을 요청해** 실행한다. 사용자가 승인하지 않으면 실행하지 않고 그 사실을 알린다.
-- 매번 승인하기 번거로우면 사용자가 `${CODEX_HOME:-~/.codex}/config.toml`에 쓰기 경로와 네트워크를 열어 둘 수 있다(https://github.com/thewronghand-bigs/mailman#codex에서-쓰기 참조). 이 설정을 Codex가 임의로 고치지 않는다.
+- 매번 승인하기 번거로우면 사용자가 `${CODEX_HOME:-~/.codex}/config.toml`에 쓰기 경로와 네트워크를 열어 둘 수 있다(https://github.com/thewronghand/mailman#codex에서-쓰기 참조). 이 설정을 Codex가 임의로 고치지 않는다.
 
 ## 먼저 할 일 — 요청이 조회·전송·스페이스 생성인지 가른다
 
@@ -105,7 +105,7 @@ DM은 `--dm colleague@example.test`, `--dm '사람 이름'`, `--dm users/USER_ID
 ## 인증
 
 - 오류가 나면 출력된 안내를 먼저 따르고, 해결되지 않을 때 `~/.claude/bin/mailman doctor` 결과를 사용자에게 보여 준다. 위 샌드박스 실행 규칙을 따른다.
-- 최초 인증: `~/.claude/bin/mailman auth --client <다운로드한 client_secret JSON>` ([설정 가이드](https://thewronghand-bigs.github.io/mailman/setup)).
+- 최초 인증: `~/.claude/bin/mailman auth --client <다운로드한 client_secret JSON>` ([설정 가이드](https://thewronghand.github.io/mailman/setup)).
 - 토큰 없음(exit 2)이나 `invalid_grant`(exit 3): `~/.claude/bin/mailman auth`로 다시 인증한다.
 - 인증은 브라우저 로그인이 필요하므로 사용자에게 직접 실행해 달라고 안내한다. 토큰·client secret·웹훅 URL은 출력하지 않는다.
 

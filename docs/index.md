@@ -25,20 +25,20 @@ permalink: /
 macOS(Apple Silicon / Intel)에서 실행합니다. bun이나 Node.js는 필요 없습니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thewronghand/mailman/main/install.sh | bash
 ```
 
 실행 파일은 `~/.claude/bin/mailman`, 슬래시 커맨드는 `~/.claude/commands/`에 설치됩니다. Codex 스킬도 함께 설치하려면 `MAILMAN_TARGET=all`(Codex만이면 `codex`)을 붙입니다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thewronghand-bigs/mailman/main/install.sh | MAILMAN_TARGET=all bash
+curl -fsSL https://raw.githubusercontent.com/thewronghand/mailman/main/install.sh | MAILMAN_TARGET=all bash
 ```
 
 ## 시작하기
 
 **A. 설정을 마친 동료에게 클라이언트 JSON을 받았다면 [8단계부터(약 5분)](setup.md#step-8), B. 처음부터 혼자 설정한다면 [1단계부터(약 20분)](setup.md#step-1)** 진행하세요. 회사 Google Workspace 계정이 필요하며, B 경로는 개인 Gmail도 준비합니다. 인증 후 `mailman doctor`로 확인합니다.
 
-가이드 마지막 단계에서 `mailman spaces '검색어' --save <별칭>`으로 방을 저장하고 Claude Code `/mailman <별칭>` 또는 Codex `$mailman`으로 조회합니다. 설치기는 설정 파일을 만들지 않으며 첫 `--save`가 0600 설정 파일을 만듭니다. 처음 저장한 별칭이 기본 방이고 바꾸려면 `--save <별칭> --default`를 사용합니다. 기존 별칭의 방 값은 덮어쓰지 않습니다. 오류가 나면 먼저 출력된 안내를 따르고, 해결되지 않으면 `mailman doctor`의 해결 링크를 확인하세요. Codex 샌드박스 설정은 [README](https://github.com/thewronghand-bigs/mailman#codex에서-쓰기)를 참고하세요.
+가이드 마지막 단계에서 `mailman spaces '검색어' --save <별칭>`으로 방을 저장하고 Claude Code `/mailman <별칭>` 또는 Codex `$mailman`으로 조회합니다. 설치기는 설정 파일을 만들지 않으며 첫 `--save`가 0600 설정 파일을 만듭니다. 처음 저장한 별칭이 기본 방이고 바꾸려면 `--save <별칭> --default`를 사용합니다. 기존 별칭의 방 값은 덮어쓰지 않습니다. 오류가 나면 먼저 출력된 안내를 따르고, 해결되지 않으면 `mailman doctor`의 해결 링크를 확인하세요. Codex 샌드박스 설정은 [README](https://github.com/thewronghand/mailman#codex에서-쓰기)를 참고하세요.
 
 방 이름·`spaces/ID`·`--dm`을 지정하면 설정 파일 없이 시작할 수 있습니다. 기본 방은 대상을 생략할 때만 필요합니다. v2.4의 첫 DM 이름 검색에는 선택 권한과 People API 사용 설정이 필요합니다([기존 사용자 업그레이드](setup.md#upgrade-v2-4)).
 
@@ -86,4 +86,4 @@ DM과 단발 메시지는 시각·발신자·본문·message name의 시간순 �
 
 - [설정 가이드](setup.md) — 사용자별 OAuth 클라이언트 만들기
 - [개인정보처리방침](privacy.md)
-- [소스 코드](https://github.com/thewronghand-bigs/mailman) · [문의(GitHub Issues)](https://github.com/thewronghand-bigs/mailman/issues)
+- [소스 코드](https://github.com/thewronghand/mailman) · [문의(GitHub Issues)](https://github.com/thewronghand/mailman/issues)
